@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none'">
+  <title>chat-thread demo</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="../src/chat-thread.css">
+  <link rel="stylesheet" href="demo.css">
+</head>
+<body>
+  <header class="top">
+    <h1>chat-thread</h1>
+    <p>One conversation component in six apps: only the colors change. Type in any box with a Send button: Enter sends, Shift+Enter breaks the line. Everything here is made-up data, and this page runs under a strict Content Security Policy.</p>
+    <nav aria-label="Sections">
+      <a href="#task">Task thread</a>
+      <a href="#session">Session console</a>
+      <a href="#directions">Directions</a>
+      <a href="#reading">Reading companion</a>
+      <a href="#log">Read-only log</a>
+      <a href="#previews">WhatsApp previews</a>
+      <a href="https://github.com/rbritta/chat-thread">GitHub</a>
+    </nav>
+  </header>
+
+  <main class="grid">
+    <section id="task" class="demo">
+      <h2>Task thread <small>dark · chat · toggles · queued · read more</small></h2>
+      <p class="note">A dev dashboard: each task opens its conversation with a work session. A message sent while the session is busy waits in the queue, dashed, and can be removed.</p>
+      <div class="frame frame--dash">
+        <div class="frame-head">Projects · Sample project</div>
+        <div class="task-row"><span class="badge">T17</span><span class="task-title">Review everything we have before writing the stories</span><span class="task-session">Session 2</span></div>
+        <div class="task-open"><div data-thread="task"></div></div>
+      </div>
+    </section>
+
+    <section id="session" class="demo">
+      <h2>Session console <small>dark · code with Copy · queued</small></h2>
+      <p class="note">The same component on a greener background: an assistant answers with a code block, and the next message waits for it to finish.</p>
+      <div class="frame frame--dev">
+        <div class="frame-head">Sessions · mirror-service</div>
+        <div class="frame-body"><div data-thread="session"></div></div>
+      </div>
+    </section>
+
+    <section id="directions" class="demo demo--wide">
+      <h2>Directions for a generated text <small>dark · smaller type</small></h2>
+      <p class="note">Short directions to an AI that rewrites the text on the right. The thread sits in a narrow column of a larger screen.</p>
+      <div class="frame frame--dash">
+        <div class="frame-head">Daily notes · Thursday</div>
+        <div class="frame-body daily">
+          <div><p class="label">Directions</p><div data-thread="directions"></div></div>
+          <div><p class="label">What I'll say</p><div class="said">Yesterday: the login fix was merged and went into the release branch. Today: backlog review with the new infrastructure feature.</div></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="reading" class="demo">
+      <h2>Reading companion <small>dark · title · read more · typing · chips</small></h2>
+      <p class="note">A reading app: the note of the day, a question about it and the answer on its way. The chips ask a ready-made question.</p>
+      <div class="frame frame--reading">
+        <div class="frame-head frame-head--center">Reading <span>· Today</span></div>
+        <div class="frame-body reading"><div data-thread="reading"></div></div>
+      </div>
+    </section>
+
+    <section id="log" class="demo">
+      <h2>Read-only log <small>dark · readonly · group authors · rendered by renderThread()</small></h2>
+      <p class="note">A message log viewer: no box, each author in a group gets a color. This thread is a string from <code>renderThread()</code>, the same call a server makes, hydrated afterwards.</p>
+      <div class="frame frame--dash">
+        <div class="frame-head">Log · Messages</div>
+        <div class="log">
+          <ul class="log-list">
+            <li class="is-active"><span class="avatar">H</span><span><b>Home</b><small>Kim: home by 7</small></span></li>
+            <li><span class="avatar avatar--2">B</span><span><b>Book club</b><small>Next meeting on Friday</small></span></li>
+            <li><span class="avatar avatar--3">S</span><span><b>Sam</b><small>thanks!</small></span></li>
+          </ul>
+          <div class="log-thread" data-thread="log"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="previews" class="demo demo--wide">
+      <h2>WhatsApp previews <small>light · preview · *bold* _italic_ ~strike~</small></h2>
+      <p class="note">A clinic messaging tool shows what the client's phone will show: the light WhatsApp look, with the tail, blue ticks and the formatting marks rendered. A scheduled message shows the clock.</p>
+      <div class="previews">
+        <div class="frame frame--dash">
+          <div class="frame-head">Messages · Appointment reminder</div>
+          <div class="frame-body form-and-preview">
+            <div class="form">
+              <p>Client<span>Alex Morgan</span></p>
+              <p>Date<span>Thu, Nov 14 at 9:30 AM</span></p>
+              <p>Template<span>Reminder (day before)</span></p>
+            </div>
+            <div><p class="label">Preview</p><div class="wallpaper" data-thread="reminder"></div></div>
+          </div>
+        </div>
+        <div class="frame frame--dash">
+          <div class="frame-head">Quote · Alex Morgan</div>
+          <div class="frame-body">
+            <div class="card">
+              <div class="card-head"><h3>Message to the client</h3><span class="status">Scheduled · Nov 14, 08:00</span></div>
+              <div class="card-body"><div class="wallpaper" data-thread="scheduled"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">MIT · <a href="https://github.com/rbritta/chat-thread">github.com/rbritta/chat-thread</a> · <a href="https://github.com/rbritta/chat-thread#use-it">Use it</a></footer>
+
+  <script type="application/json" id="demo-data">
+  {
+    "task": {
+      "options": { "author": "Session 2", "clamp": 300, "strings": { "placeholder": "Message to Session 2" }, "toggles": [{ "name": "close", "label": "Close the session when done" }] },
+      "reply": "Got it: I'll pick that up right after the current step.",
+      "messages": [
+        { "from": "me", "when": [0, "17:50"], "text": "We need to review everything we have, along with the HTML we generated, so we can start writing the user stories, with product, epic, etc" },
+        { "from": "other", "when": [0, "17:53"], "text": "**On it (T17).** Plan:\n1. go through the open questions, the to-do list and the decisions\n2. reconcile the backlog page with the six story drafts\n3. look at [story 1042](#task) and [task 1043](#task)\n\nFirst batch for your review coming shortly." },
+        { "from": "other", "when": [0, "17:59"], "text": "First pass done; the skeleton is waiting on your OK (request 1, with the exact texts).\n\nWhat changed the plan: this morning a new feature was opened for the shared infrastructure, with its own story. It covers our old infra stories for the test environment: containers, secrets, database, image pipeline, sign-in. So we don't duplicate them: our first epic links to it as related.\n\nRevision 3: product > two epics (MVP) > 6 features > 11 new stories." },
+        { "from": "me", "when": [0, "18:02"], "state": "queued", "tag": "waits for the session · close when done", "text": "Also check the two payment stories before the skeleton" }
+      ]
+    },
+    "session": {
+      "options": { "author": "Assistant", "strings": { "placeholder": "Message to the session" } },
+      "reply": "Applied and rerun: 49 ok.",
+      "messages": [
+        { "from": "me", "when": [0, "16:40"], "text": "run the mirror tests and tell me what broke" },
+        { "from": "other", "when": [0, "16:42"], "text": "Ran it: 48 ok, 1 failing in `edits.test.js` (editing a deleted message).\n\n```\nnode edits.test.js\n✗ editing a deleted message keeps the original\n```\nThe fix is one line in `edits.js`; want me to apply it?" },
+        { "from": "me", "when": [0, "16:43"], "state": "queued", "text": "yes, apply and rerun" }
+      ]
+    },
+    "directions": {
+      "options": { "author": "AI", "days": false, "strings": { "placeholder": "Direction for the text" } },
+      "reply": "Done: the release branch is named now.",
+      "messages": [
+        { "from": "me", "when": [0, "09:12"], "text": "shorter, drop the build details" },
+        { "from": "other", "when": [0, "09:12"], "text": "Done: two lines now, build details out, the PR number kept." }
+      ]
+    },
+    "reading": {
+      "options": { "clamp": 200, "typing": true, "strings": { "placeholder": "Ask about the reading" }, "chips": ["Explain the passage", "Historical context", "How to apply it today"] },
+      "reply": "It is the path that keeps the river whole: not the shortest one, the one it can follow without breaking.",
+      "messages": [
+        { "from": "other", "when": [0, "06:00"], "title": "Note of the day · Patience", "text": "The river does not hurry, and still it reaches the sea. Every bend that looks like a delay is the water finding the way that holds it.\n\nThe point is not that the bends go away: it is that the river keeps moving through them, one stretch at a time, and arrives.\n\nSo today, when something takes longer than planned, ask what it shows about the shape of the way before asking how to make it straight." },
+        { "from": "me", "when": [0, "07:14"], "text": "what does \"the way that holds it\" mean?" }
+      ]
+    },
+    "log": {
+      "options": { "mode": "readonly", "format": "whatsapp", "colorAuthors": true },
+      "messages": [
+        { "from": "other", "when": [3, "18:02"], "author": "Dana", "text": "anyone passing by the store? we're out of coffee" },
+        { "from": "other", "when": [3, "18:05"], "author": "Kim", "text": "I'll go, home by 7" },
+        { "from": "me", "when": [3, "18:06"], "text": "I'll bring *bread* then" }
+      ]
+    },
+    "reminder": {
+      "options": { "mode": "preview", "theme": "whatsapp", "format": "whatsapp" },
+      "messages": [
+        { "from": "me", "when": [0, "09:41"], "text": "Hi, Alex! 😊 Your appointment moved from ~Wednesday~ to *Thursday, Nov 14 at 9:30 AM*, with Dr. Rivera.\n\nCan you confirm? Anything, just reply here or call _(555) 010-0199_." }
+      ]
+    },
+    "scheduled": {
+      "options": { "mode": "preview", "theme": "whatsapp", "format": "whatsapp" },
+      "messages": [
+        { "from": "me", "when": [0, "08:00"], "state": "pending", "text": "Hi, Alex! Here is the treatment quote: *$480* in up to 6 installments.\n\nThe details: https://example.com/q/4f2k" }
+      ]
+    }
+  }
+  </script>
+  <script type="module" src="demo.js"></script>
+</body>
+</html>

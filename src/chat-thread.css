@@ -1,0 +1,281 @@
+/* chat-thread: every color and size is a custom property on .ct, so an app repaints the
+   thread by setting a few of them on its own container. Default: the dark green palette. */
+.ct {
+  --ct-mine: #1f3b34;
+  --ct-mine-border: #2b5248;
+  --ct-theirs: #1a1f26;
+  --ct-theirs-border: #262d37;
+  --ct-text: #e6edf3;
+  --ct-muted: #8b949e;
+  --ct-tick: #7fb8a6;
+  --ct-link: #58a6ff;
+  --ct-hover: #6e7681;
+  --ct-author: #7db8e7;
+  --ct-author-1: #7db8e7;
+  --ct-author-2: #c2c79d;
+  --ct-author-3: #b9a9db;
+  --ct-author-4: #e7a77d;
+  --ct-author-5: #8fd1a8;
+  --ct-author-6: #e79bbd;
+  --ct-title: #6fbf9f;
+  --ct-field: #141920;
+  --ct-field-border: #2a323d;
+  --ct-focus: #3c6f62;
+  --ct-send: #2f6f5e;
+  --ct-send-icon: #e6f3ee;
+  --ct-alert: #f85149;
+  --ct-day: #151a20;
+  --ct-chip: #12171d;
+  --ct-code: rgba(127, 127, 127, .18);
+  --ct-pre: rgba(0, 0, 0, .25);
+  --ct-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --ct-mono: ui-monospace, SFMono-Regular, Consolas, monospace;
+  --ct-font-size: 14.5px;
+  --ct-input-size: 15px;
+  --ct-max-width: min(86%, 680px);
+  --ct-clamp: 7.4em;
+
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  color: var(--ct-text);
+  font: var(--ct-font-size)/1.45 var(--ct-font);
+  text-align: left;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.ct *, .ct *::before, .ct *::after { box-sizing: border-box; }
+
+.ct-list { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+
+.ct-day {
+  align-self: center;
+  margin: 6px 0;
+  padding: 3px 10px;
+  border-radius: 8px;
+  background: var(--ct-day);
+  color: var(--ct-muted);
+  font-size: 12px;
+}
+
+/* bubbles */
+.ct-msg {
+  --ct-fade: var(--ct-theirs);
+  position: relative;
+  display: flow-root;
+  min-width: 0;
+  max-width: var(--ct-max-width);
+  padding: 6px 10px 5px;
+  border-radius: 10px;
+}
+.ct-msg--mine {
+  --ct-fade: var(--ct-mine);
+  align-self: flex-end;
+  background: var(--ct-mine);
+  border: 1px solid var(--ct-mine-border);
+  border-top-right-radius: 3px;
+}
+.ct-msg--theirs {
+  align-self: flex-start;
+  background: var(--ct-theirs);
+  border: 1px solid var(--ct-theirs-border);
+  border-top-left-radius: 3px;
+}
+.ct-msg--queued { border-style: dashed; opacity: .85; }
+.ct-msg--alert { border-color: var(--ct-alert); }
+
+.ct-author { display: block; margin-bottom: 1px; color: var(--ct-author); font-size: 12.5px; font-weight: 650; }
+.ct-author--1 { color: var(--ct-author-1); }
+.ct-author--2 { color: var(--ct-author-2); }
+.ct-author--3 { color: var(--ct-author-3); }
+.ct-author--4 { color: var(--ct-author-4); }
+.ct-author--5 { color: var(--ct-author-5); }
+.ct-author--6 { color: var(--ct-author-6); }
+.ct-title { margin: 0 0 4px; color: var(--ct-title); font-weight: 600; }
+
+.ct-body p { margin: 0 0 5px; }
+.ct-body p:last-child { margin-bottom: 0; }
+.ct-body .ct-heading { margin: 8px 0 3px; font-weight: 700; }
+.ct-body .ct-heading:first-child { margin-top: 0; }
+.ct-body ul, .ct-body ol { margin: 3px 0 5px; padding-left: 20px; }
+.ct-body li { margin: 2px 0; }
+.ct-body > :last-child { margin-bottom: 0; }
+.ct-plain { white-space: pre-wrap; }
+.ct a { color: var(--ct-link); text-decoration: none; }
+.ct a:hover { color: var(--ct-hover); }
+.ct-body code { padding: 0 4px; border-radius: 4px; background: var(--ct-code); font: 12.5px var(--ct-mono); }
+.ct-body code.ct-mono { padding: 0; background: none; font-size: .95em; white-space: pre-wrap; }
+.ct-code { position: relative; margin: 4px 0 6px; }
+.ct-code pre {
+  margin: 0;
+  padding: 8px 58px 8px 10px;
+  overflow-x: auto;
+  border: 1px solid var(--ct-theirs-border);
+  border-radius: 6px;
+  background: var(--ct-pre);
+  font: 12.5px/1.45 var(--ct-mono);
+  white-space: pre;
+  overflow-wrap: normal;
+}
+.ct-code pre code { padding: 0; border-radius: 0; background: none; font: inherit; }
+.ct-copy {
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  padding: 1px 8px;
+  border: 1px solid var(--ct-theirs-border);
+  border-radius: 6px;
+  background: var(--ct-theirs);
+  color: var(--ct-muted);
+  font: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+.ct-copy:hover { color: var(--ct-hover); }
+
+/* time and ticks, floating at the end of the last line */
+.ct-meta {
+  float: right;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin: 7px -2px -3px 12px;
+  color: var(--ct-muted);
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+.ct-tick { width: 15px; height: 15px; fill: none; stroke: var(--ct-muted); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ct-tick--read { stroke: var(--ct-tick); }
+.ct-remove { padding: 0 0 0 6px; border: 0; background: none; color: var(--ct-muted); font: inherit; font-size: 14px; line-height: 1; cursor: pointer; }
+.ct-remove:hover { color: var(--ct-alert); }
+.ct-tag { margin-right: 4px; color: var(--ct-muted); font-size: 11px; }
+
+/* long messages */
+.ct-body--clamped { position: relative; max-height: var(--ct-clamp); overflow: hidden; }
+.ct-body--clamped::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 40px;
+  background: linear-gradient(180deg, transparent, var(--ct-fade));
+}
+.ct-more { padding: 4px 0 0; border: 0; background: none; color: var(--ct-link); font: inherit; font-size: 13.5px; font-weight: 600; cursor: pointer; }
+.ct-more:hover { color: var(--ct-hover); }
+
+/* the other side is writing, or has not answered */
+.ct-dots { display: inline-flex; gap: 4px; padding: 5px 2px; }
+.ct-dots i { width: 7px; height: 7px; border-radius: 50%; background: var(--ct-muted); animation: ct-bounce 1s infinite; }
+.ct-dots i:nth-child(2) { animation-delay: .15s; }
+.ct-dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes ct-bounce {
+  0%, 60%, 100% { opacity: .3; transform: none; }
+  30% { opacity: 1; transform: translateY(-3px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ct-dots i { animation: none; opacity: .6; }
+}
+.ct-waiting { align-self: flex-start; padding: 2px 4px; color: var(--ct-muted); font-size: 13px; font-style: italic; }
+
+/* the box */
+.ct-composer { margin-top: 8px; }
+.ct-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.ct-chip {
+  padding: 4px 12px;
+  border: 1px solid var(--ct-theirs-border);
+  border-radius: 999px;
+  background: var(--ct-chip);
+  color: var(--ct-text);
+  font: inherit;
+  font-size: 13px;
+  opacity: .85;
+  cursor: pointer;
+}
+.ct-chip:hover { opacity: 1; }
+.ct-row { display: flex; align-items: flex-end; gap: 6px; }
+.ct-field {
+  display: flex;
+  flex: 1;
+  align-items: flex-end;
+  min-width: 0;
+  padding: 9px 16px;
+  border: 1px solid var(--ct-field-border);
+  border-radius: 22px;
+  background: var(--ct-field);
+}
+.ct-field:focus-within { border-color: var(--ct-focus); }
+.ct-input {
+  flex: 1;
+  height: 1.45em;
+  min-height: 1.45em;
+  max-height: calc(6 * 1.45em);
+  padding: 0;
+  overflow-y: hidden;
+  border: 0;
+  outline: 0;
+  background: none;
+  color: var(--ct-text);
+  font: inherit;
+  font-size: var(--ct-input-size);
+  line-height: 1.45;
+  resize: none;
+}
+.ct-input::placeholder { color: var(--ct-muted); opacity: .8; }
+.ct-send {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin-bottom: 1px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--ct-send);
+  cursor: pointer;
+  transition: opacity .15s, transform .15s;
+}
+.ct-send:disabled { opacity: .35; transform: scale(.92); cursor: default; }
+.ct-send svg { width: 18px; height: 18px; margin-left: 2px; fill: var(--ct-send-icon); }
+.ct-toggles { display: flex; flex-wrap: wrap; gap: 14px; margin: 6px 4px 0; color: var(--ct-muted); font-size: 12.5px; }
+.ct-toggles label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+.ct button:focus-visible, .ct-toggles input:focus-visible { outline: 2px solid var(--ct-focus); outline-offset: 2px; }
+
+/* the light WhatsApp look: for previews of what the other phone will show */
+.ct--whatsapp {
+  --ct-mine: #d9fdd3;
+  --ct-mine-border: #d9fdd3;
+  --ct-theirs: #ffffff;
+  --ct-theirs-border: #ffffff;
+  --ct-text: #111b21;
+  --ct-muted: #667781;
+  --ct-tick: #53bdeb;
+  --ct-link: #027eb5;
+  --ct-author: #1f7aad;
+  --ct-title: #111b21;
+  --ct-field: #ffffff;
+  --ct-field-border: #ffffff;
+  --ct-focus: #d1d7db;
+  --ct-send: #00a884;
+  --ct-send-icon: #ffffff;
+  --ct-day: #ffffffcc;
+  --ct-chip: #ffffff;
+  --ct-code: rgba(11, 20, 26, .06);
+  --ct-pre: rgba(11, 20, 26, .05);
+  --ct-font-size: 14.2px;
+}
+.ct--whatsapp .ct-msg { border-radius: 8px; box-shadow: 0 1px .5px rgba(11, 20, 26, .13); }
+.ct--whatsapp .ct-msg--mine { margin-right: 8px; border-top-right-radius: 0; }
+.ct--whatsapp .ct-msg--theirs { margin-left: 8px; border-top-left-radius: 0; }
+.ct--whatsapp .ct-msg--mine::after,
+.ct--whatsapp .ct-msg--theirs::after {
+  content: "";
+  position: absolute;
+  top: -1px;
+  border: 8px solid transparent;
+  border-width: 8px 4px;
+}
+.ct--whatsapp .ct-msg--mine::after { right: -8px; border-top-color: var(--ct-mine); border-left-color: var(--ct-mine); }
+.ct--whatsapp .ct-msg--theirs::after { left: -8px; border-top-color: var(--ct-theirs); border-right-color: var(--ct-theirs); }
+.ct--whatsapp .ct-msg.ct-typing::after { display: none; }

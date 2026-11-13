@@ -1,0 +1,151 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import { DatabaseSync } from 'node:sqlite';
+import { createHttpHandler, createSqliteStore, renderThread } from '../server/index.js';
+import { restStore } from '../src/chat-thread.js';
+
+const clock = (start = '2026-11-13T12:00:00.000Z') => {
+  let t = Date.parse(start);
+  const now = () => new Date(t).toISOString();
+  now.advance = (ms) => { t += ms; };
+  return now;
+};
+
+test('add, load, update and remove messages of a thread; nothing is deleted', () => {
+  const now = clock();
+  const changes = [];
+  const db = new DatabaseSync(':memory:');
+  const store = createSqliteStore(db, { now, onChange: (c) => changes.push(`${c.type}:${c.thread}`) });
+  const a = store.add('support', { from: 'me', text: 'Is the backup done?\r\n' });
+  now.advance(60_000);
+  const b = store.add('support', { author: 'Assistant', text: 'Yes, at **03:10**.', meta: { run: 7 } });
+  store.add('other-thread', { text: 'elsewhere' });
+  assert.deepEqual([a.from, a.text, a.state, a.at], ['me', 'Is the backup done?', null, '2026-11-13T12:00:00.000Z']);
+  assert.deepEqual([b.from, b.author, b.meta, b.alert], ['other', 'Assistant', { run: 7 }, false]);
+  assert.deepEqual(store.load('support').messages.map((m) => m.id), [a.id, b.id]);
+
+  const read = store.update('support', a.id, { state: 'read' });
+  assert.equal(read.state, 'read');
+  const streamed = store.update('support', b.id, { text: 'Yes, at **03:10**. All 4 disks.', alert: true });
+  assert.deepEqual([streamed.text, streamed.alert], ['Yes, at **03:10**. All 4 disks.', true]);
+  assert.deepEqual(store.remove('support', a.id), { ok: true, id: a.id });
+  assert.deepEqual(store.load('support').messages.map((m) => m.id), [b.id]);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM chat_messages').get().n, 3, 'the removed row is still there');
+  assert.ok(db.prepare('SELECT removed_at FROM chat_messages WHERE id = ?').get(a.id).removed_at);
+  assert.throws(() => store.update('support', a.id, { state: 'read' }), { name: 'NotFoundError' });
+  assert.throws(() => store.update('other-thread', b.id, { state: 'read' }), { name: 'NotFoundError' }, 'ids belong to their thread');
+  assert.deepEqual(changes, ['add:support', 'add:support', 'add:other-thread', 'update:support', 'update:support', 'remove:support']);
+});
+
+test('the store refuses what a thread would never send', () => {
+  const store = createSqliteStore(new DatabaseSync(':memory:'));
+  assert.throws(() => store.add('t', {}), { name: 'ValidationError' });
+  assert.throws(() => store.add('t', { text: '   ' }), { name: 'ValidationError' });
+  assert.throws(() => store.add('t', { text: 'x', from: 'admin' }), /from must be/);
+  assert.throws(() => store.add('t', { text: 'x', state: 'lost' }), /state must be/);
+  assert.throws(() => store.add('t', { text: 'x', format: 'html' }), /format must be/);
+  assert.throws(() => store.add('t', { text: 'x', alert: 'yes' }), /alert must be/);
+  assert.throws(() => store.add('t', { text: 'x', at: 'nope' }), /at must be/);
+  assert.throws(() => store.add('t', { text: 'x', meta: [1] }), /meta must be/);
+  assert.throws(() => store.add('t', { text: 'x'.repeat(20001) }), /longer than/);
+  assert.throws(() => store.add('../etc', { text: 'x' }), /thread must be/);
+  assert.throws(() => createSqliteStore(new DatabaseSync(':memory:'), { table: 'x; DROP TABLE y' }), /invalid table/);
+  assert.equal(store.add('t', { text: 'x', author: 'a'.repeat(200) }).author.length, 80, 'labels are cut, not refused');
+});
+
+test('load pages backwards with limit and before; threads lists the latest first', () => {
+  const store = createSqliteStore(new DatabaseSync(':memory:'), { table: 'msgs' });
+  const ids = Array.from({ length: 5 }, (_, i) => store.add('a', { text: `m${i}` }).id);
+  store.add('b', { text: 'only one' });
+  assert.deepEqual(store.load('a', { limit: 2 }).messages.map((m) => m.text), ['m3', 'm4']);
+  assert.deepEqual(store.load('a', { limit: 2, before: ids[3] }).messages.map((m) => m.text), ['m1', 'm2']);
+  const { threads } = store.threads();
+  assert.deepEqual(threads.map((t) => [t.thread, t.count, t.last.text]), [['b', 1, 'only one'], ['a', 5, 'm4']]);
+});
+
+test('what the store returns renders straight into a thread', () => {
+  const store = createSqliteStore(new DatabaseSync(':memory:'), { now: clock() });
+  store.add('t', { from: 'me', text: 'hi' });
+  store.add('t', { author: 'Bot', text: '**hello**' });
+  const html = renderThread(store.load('t').messages, { timeZone: 'UTC', now: () => new Date('2026-11-13T20:00:00Z') });
+  assert.match(html, /ct-msg--mine/);
+  assert.match(html, /<span class="ct-author">Bot<\/span><div class="ct-body"><p><strong>hello<\/strong>/);
+  assert.match(html, /class="ct-day"[^>]*>Today</);
+});
+
+async function withServer(fn) {
+  const store = createSqliteStore(new DatabaseSync(':memory:'), { now: clock() });
+  const handle = createHttpHandler(store, { prefix: '/api/chat' });
+  const server = createServer(async (req, res) => {
+    if (await handle(req, res)) return;
+    res.writeHead(418);
+    res.end();
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    await fn({ store, base });
+  } finally {
+    server.close();
+  }
+}
+
+test('restStore against the HTTP handler: the browser always writes as me', async () => {
+  await withServer(async ({ store, base }) => {
+    const rest = restStore(`${base}/api/chat/support`);
+    const sent = await rest.send({ from: 'other', text: 'pretending', author: 'Admin', state: 'queued', meta: { toggles: { close: true } } });
+    assert.deepEqual([sent.from, sent.author, sent.state, sent.meta], ['me', '', 'queued', { toggles: { close: true } }]);
+    const reply = store.add('support', { from: 'other', author: 'Assistant', text: 'Hello' });
+    assert.deepEqual((await rest.load()).messages.map((m) => m.from), ['me', 'other']);
+    await assert.rejects(rest.remove(reply.id), /message not found/, 'the browser cannot remove the other side');
+    assert.deepEqual(await rest.remove(sent.id), { ok: true, id: sent.id });
+    assert.deepEqual((await rest.load()).messages.map((m) => m.id), [reply.id]);
+    const threads = await (await fetch(`${base}/api/chat`)).json();
+    assert.deepEqual(threads.threads.map((t) => t.thread), ['support']);
+    const page = await (await fetch(`${base}/api/chat/support?limit=1`)).json();
+    assert.equal(page.messages.length, 1);
+    assert.equal((await fetch(`${base}/elsewhere`)).status, 418, 'other routes fall through');
+  });
+});
+
+test('the handler answers errors as JSON with the right status', async () => {
+  await withServer(async ({ base }) => {
+    const post = (path, body, raw) => fetch(`${base}${path}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: raw ?? JSON.stringify(body) });
+    let res = await post('/api/chat/t', { text: '' });
+    assert.equal(res.status, 400);
+    assert.match((await res.json()).error, /needs a text/);
+    res = await post('/api/chat/t', { text: 'x', state: 'read' });
+    assert.equal(res.status, 400, 'the browser cannot claim a read tick');
+    res = await post('/api/chat/t', null, '{not json');
+    assert.equal(res.status, 400);
+    res = await post('/api/chat/t', null, JSON.stringify({ text: 'x'.repeat(70 * 1024) }));
+    assert.equal(res.status, 413);
+    res = await post('/api/chat/bad%2', { text: 'x' });
+    assert.equal(res.status, 400);
+    res = await fetch(`${base}/api/chat/t/1`, { method: 'PATCH', body: JSON.stringify({ state: 'read' }) });
+    assert.equal(res.status, 400);
+    res = await fetch(`${base}/api/chat/t/99`, { method: 'PATCH', body: JSON.stringify({ removed: true }) });
+    assert.equal(res.status, 404);
+    res = await fetch(`${base}/api/chat/t/x/y`);
+    assert.equal(res.status, 404);
+    assert.equal(res.headers.get('cache-control'), 'no-store');
+  });
+});
+
+test('a body some framework already read is used as is', async () => {
+  const store = createSqliteStore(new DatabaseSync(':memory:'));
+  const handle = createHttpHandler(store);
+  const fakeRes = () => {
+    const res = { status: 0, body: '', writeHead(s) { res.status = s; }, end(b) { res.body = b; } };
+    return res;
+  };
+  for (const body of [{ text: 'as object' }, JSON.stringify({ text: 'as string' })]) {
+    const res = fakeRes();
+    assert.equal(await handle({ method: 'POST', url: '/api/chat/t', body }, res), true);
+    assert.equal(res.status, 201);
+  }
+  assert.deepEqual(store.load('t').messages.map((m) => [m.from, m.text]), [['me', 'as object'], ['me', 'as string']]);
+  const res = fakeRes();
+  assert.equal(await handle({ method: 'GET', url: '/somewhere-else' }, res), false);
+});
