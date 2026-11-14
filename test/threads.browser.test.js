@@ -259,3 +259,25 @@ test('a long thread shows its latest messages, the earlier ones behind a button'
   assert.deepEqual(errors, []);
   await ctx.close();
 });
+
+test('showing earlier messages rises them in; folding back fades them out first', async (t) => {
+  if (!browser) return t.skip('no browser');
+  const ctx = await browser.newContext({ viewport: { width: 1200, height: 900 }, reducedMotion: 'no-preference' });
+  const p = await ctx.newPage();
+  const errors = [];
+  p.on('pageerror', (e) => errors.push(e.message));
+  await p.goto(`${base}/demo/`);
+  await p.waitForSelector(`${team} .ct-th`, { state: 'attached' });
+  await p.evaluate(() => { for (let i = 0; i < 4; i++) window.demoThreads.team.append('t2', { from: 'other', author: 'Ana', text: `n${i}`, at: new Date().toISOString() }); });
+  const bt = p.locator(`${team} .ct-th--active .ct-th-earlier`);
+  await bt.click();
+  assert.ok(await p.locator(`${team} .ct-th--active .ct-th-in`).count() > 0, 'rising in');
+  await bt.click();
+  const out = await p.locator(`${team} .ct-th--active .ct-msg.ct-th-out`).count();
+  assert.ok(out > 0, 'fading out');
+  assert.equal(await visible(p, `${team} .ct-th--active .ct-msg`), out + 2, 'still on screen while fading');
+  await p.waitForFunction((sel) => !document.querySelector(`${sel} .ct-th-out`), team);
+  assert.equal(await visible(p, `${team} .ct-th--active .ct-msg`), 2);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});

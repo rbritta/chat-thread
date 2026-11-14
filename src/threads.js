@@ -201,6 +201,30 @@ export function createThreads(el, options = {}) {
     count();
   }
 
+  /** "Show N earlier" / "Show only the latest", with a light motion: the earlier ones rise in, or fade out before folding. */
+  function earlierToggle(x) {
+    const quiet = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const l = x.el.querySelector('.ct-list');
+    clearTimeout(x.foldTimer);
+    for (const n of l?.querySelectorAll('.ct-th-in, .ct-th-out') || []) n.classList.remove('ct-th-in', 'ct-th-out');
+    if (!x.all) {
+      const shown = [...(l?.querySelectorAll('.ct-th-old') || [])];
+      x.all = true;
+      fold(x);
+      if (!quiet) for (const n of shown) n.classList.add('ct-th-in');
+      return;
+    }
+    x.all = false;
+    fold(x);
+    const going = [...(l?.querySelectorAll('.ct-th-old') || [])];
+    if (quiet || !going.length) return bottom(x);
+    for (const n of going) n.classList.add('ct-th-out');
+    x.foldTimer = setTimeout(() => {
+      for (const n of going) n.classList.remove('ct-th-out');
+      bottom(x);
+    }, 180);
+  }
+
   /** A long thread shows only its latest messages, with "Show N earlier" above them. */
   function fold(x) {
     const l = x.el.querySelector('.ct-list');
@@ -359,7 +383,7 @@ export function createThreads(el, options = {}) {
     const earlier = target.closest('.ct-th-earlier');
     if (earlier) {
       const y = [...items.values()].find((z) => z.el.contains(earlier));
-      if (y) { y.all = !y.all; fold(y); if (!y.all) bottom(y); }
+      if (y) earlierToggle(y);
       return;
     }
     const b = target.closest('.ct-th-branch');

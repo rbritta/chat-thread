@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.2 (2026-11-14)
+
+- A light motion on "Show N earlier" and "Show only the latest": the earlier messages rise in (fade from 6 px below, 0.22 s); folding back fades them out before they go. None with `prefers-reduced-motion`.
+
 ## 0.5.1 (2026-11-14)
 
 - "Show N earlier messages" in purple (`--ct-th-earlier`, `--ct-th-earlier-border`), so it is seen at a glance.
