@@ -1,4 +1,4 @@
-/*! chat-thread v0.5.2 | MIT | https://github.com/rbritta/chat-thread */
+/*! chat-thread v0.5.3 | MIT | https://github.com/rbritta/chat-thread */
 /**
  * Pure helpers for chat-thread: text formats, times and the HTML of a thread as a string.
  * No DOM and no I/O, so a server renders the exact markup the browser does, and every
@@ -16,7 +16,7 @@ const MODES = Object.freeze(['chat', 'readonly', 'preview']);
 /** `bubble` is a message in a bubble; `note` is the other side narrating, full width, with no bubble. */
 const KINDS = Object.freeze(['bubble', 'note']);
 
-/** Every visible word. Pass `strings` to translate: `{ placeholder: 'Mensagem', send: 'Enviar' }`. */
+/** Every visible word. Pass `strings` to reword or translate: `{ placeholder: 'Write a reply', send: 'Post' }`. */
 const DEFAULT_STRINGS = Object.freeze({
   thread: 'Conversation',
   placeholder: 'Message',

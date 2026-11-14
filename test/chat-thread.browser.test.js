@@ -435,12 +435,12 @@ test('hydrating a server-rendered thread the way an app does: the server\'s opti
     document.querySelector('main').prepend(el);
     const at = new Date(Date.now() - 60000).toISOString();
     el.innerHTML = renderThread([
-      { id: 11, from: 'other', author: 'Assistente', text: `Olá! ${'palavra '.repeat(120)}`, at },
-      { id: 12, from: 'me', text: 'depois', state: 'queued', at },
+      { id: 11, from: 'other', author: 'Helper', text: `Hi! ${'word '.repeat(120)}`, at },
+      { id: 12, from: 'me', text: 'later', state: 'queued', at },
     ], {
-      timeZone: 'Asia/Tokyo', locale: 'pt-BR', author: 'Assistente',
-      strings: { placeholder: 'Mensagem', more: 'Ler mais', less: 'Mostrar menos', failed: 'Não enviada' },
-      toggles: [{ name: 'close', label: 'Fechar ao terminar' }],
+      timeZone: 'Asia/Tokyo', locale: 'en-GB', author: 'Helper',
+      strings: { placeholder: 'Write a reply', more: 'Show all', less: 'Fold it back', failed: 'Could not send' },
+      toggles: [{ name: 'close', label: 'Close when done' }],
     }, { waiting: true });
     window.calls = [];
     window.failNext = false;
@@ -456,18 +456,18 @@ test('hydrating a server-rendered thread the way an app does: the server\'s opti
     });
   });
   const served = p.locator('#served');
-  assert.equal(await served.locator('.ct-input').getAttribute('placeholder'), 'Mensagem');
+  assert.equal(await served.locator('.ct-input').getAttribute('placeholder'), 'Write a reply');
   await served.locator('.ct-more').click();
-  assert.equal(await served.locator('.ct-more').textContent(), 'Mostrar menos', 'the words came from the markup');
+  assert.equal(await served.locator('.ct-more').textContent(), 'Fold it back', 'the words came from the markup');
 
   await served.locator('.ct-toggles input[name=close]').check();
-  await served.locator('.ct-input').fill('oi');
+  await served.locator('.ct-input').fill('hello');
   await served.locator('.ct-input').press('Enter');
   const sent = served.locator('.ct-msg--mine[data-id="99"]');
   await sent.waitFor();
   const tokyo = await p.evaluate(() => {
     const now = new Date();
-    const time = new Intl.DateTimeFormat('pt-BR', { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(now);
+    const time = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(now);
     const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo' }).format(now);
     return { time, day };
   });
@@ -475,23 +475,23 @@ test('hydrating a server-rendered thread the way an app does: the server\'s opti
   assert.equal(await sent.getAttribute('data-day'), tokyo.day);
   assert.equal(await served.locator('.ct-waiting').count(), 1, 'sending does not answer for the other side');
 
-  await p.evaluate(() => window.served.append({ id: 100, from: 'other', text: 'Pronto.' }));
+  await p.evaluate(() => window.served.append({ id: 100, from: 'other', text: 'Done.' }));
   assert.equal(await served.locator('.ct-waiting').count(), 0, 'the reply clears the waiting line the server drew');
-  assert.equal(await served.locator('.ct-msg--theirs').last().locator('.ct-author').textContent(), 'Assistente');
+  assert.equal(await served.locator('.ct-msg--theirs').last().locator('.ct-author').textContent(), 'Helper');
   await p.evaluate(() => window.served.setTyping(true));
-  assert.equal(await served.locator('.ct-typing .ct-sr').textContent(), 'Assistente is typing');
+  assert.equal(await served.locator('.ct-typing .ct-sr').textContent(), 'Helper is typing');
   await p.evaluate(() => window.served.setTyping(false));
 
   await served.locator('.ct-remove').click();
   assert.equal(await served.locator('.ct-msg--queued').count(), 0);
 
   await p.evaluate(() => { window.failNext = true; });
-  await served.locator('.ct-input').fill('de novo');
+  await served.locator('.ct-input').fill('again');
   await served.locator('.ct-input').press('Enter');
   await served.locator('.ct-tick--failed').waitFor();
-  assert.equal(await served.locator('.ct-tick--failed').getAttribute('aria-label'), 'Não enviada');
+  assert.equal(await served.locator('.ct-tick--failed').getAttribute('aria-label'), 'Could not send');
   assert.deepEqual(await p.evaluate(() => window.calls), [
-    ['send', 'oi', { close: true }], ['remove', '12'], ['send', 'de novo', { close: true }], ['error', 'offline'],
+    ['send', 'hello', { close: true }], ['remove', '12'], ['send', 'again', { close: true }], ['error', 'offline'],
   ]);
   assert.deepEqual(errors, []);
   await ctx.close();

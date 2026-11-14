@@ -74,10 +74,10 @@ test('times and day labels follow the time zone and the locale', () => {
   assert.equal(dayKey('nope'), '');
   // 12 or 24 hours: the locale decides, like the rest of the page; hour12 forces one of them
   assert.equal(formatTime('2026-11-13T17:05:00Z', UTC), '5:05 PM');
-  assert.equal(formatTime('2026-11-13T17:05:00Z', { timeZone: 'UTC', locale: 'pt-BR' }), '17:05');
+  assert.equal(formatTime('2026-11-13T17:05:00Z', { timeZone: 'UTC', locale: 'en-IE' }), '17:05');
   assert.equal(formatTime('2026-11-13T09:05:00Z', { timeZone: 'UTC', locale: 'en-GB' }), '09:05');
   assert.equal(formatTime('2026-11-13T17:05:00Z', { ...UTC, hour12: false }), '17:05');
-  assert.equal(formatTime('2026-11-13T17:05:00Z', { timeZone: 'UTC', locale: 'pt-BR', hour12: true }).startsWith('5:05'), true);
+  assert.equal(formatTime('2026-11-13T17:05:00Z', { timeZone: 'UTC', locale: 'en-GB', hour12: true }).startsWith('5:05'), true);
   assert.equal(resolveOptions({ hour12: 'yes' }).hour12, undefined, 'only true or false force it');
   assert.equal(formatTime('2026-11-13T17:05:00Z', { timeZone: 'Bad/Zone' }).length > 0, true, 'a bad zone falls back instead of throwing');
   const opts = { now: NOW(), ...UTC };
@@ -86,8 +86,8 @@ test('times and day labels follow the time zone and the locale', () => {
   assert.equal(dayLabel('2026-11-10', opts), 'Tuesday');
   assert.equal(dayLabel('2026-10-02', opts), 'Oct 2');
   assert.equal(dayLabel('2025-10-02', opts), 'Oct 2, 2025');
-  assert.equal(dayLabel('2026-11-10', { ...opts, locale: 'pt-BR' }), 'Terça-feira');
-  assert.equal(dayLabel('2026-11-13', { ...opts, strings: { ...DEFAULT_STRINGS, today: 'Hoje' } }), 'Hoje');
+  assert.equal(dayLabel('2026-10-02', { ...opts, locale: 'en-GB' }), '2 Oct');
+  assert.equal(dayLabel('2026-11-13', { ...opts, strings: { ...DEFAULT_STRINGS, today: 'Earlier today' } }), 'Earlier today');
 });
 
 test('normalizeMessage falls back on bad input instead of throwing', () => {
@@ -321,9 +321,9 @@ test('typing dots take the shape of the other side: a note side types as a note'
 });
 
 test('a failed message shows a red mark labelled "Not sent" in place of the ticks', () => {
-  const html = renderMessage({ id: 'tmp-1', from: 'me', text: 'hello', state: 'failed', alert: true }, { strings: { failed: 'Não enviada' } });
+  const html = renderMessage({ id: 'tmp-1', from: 'me', text: 'hello', state: 'failed', alert: true }, { strings: { failed: 'Could not send' } });
   assert.match(html, /^<div class="ct-msg ct-msg--mine ct-msg--alert"/);
-  assert.match(html, /<svg class="ct-tick ct-tick--failed"[^>]*aria-label="Não enviada">/);
+  assert.match(html, /<svg class="ct-tick ct-tick--failed"[^>]*aria-label="Could not send">/);
   assert.equal(normalizeMessage({ state: 'failed' }).state, 'failed');
 });
 
@@ -331,7 +331,7 @@ test('the thread carries its options for hydration, escaped, and only those that
   const evil = '"><img src=x onerror=alert(1)>';
   const html = renderThread([], {
     ...UTC, author: evil, hour12: true, mode: 'readonly', days: true, typingKind: 'note',
-    strings: { placeholder: 'Mensagem', send: DEFAULT_STRINGS.send, more: evil, less: undefined },
+    strings: { placeholder: 'Write a reply', send: DEFAULT_STRINGS.send, more: evil, less: undefined },
     toggles: [{ name: 'close', label: evil }], chips: ['Hi'],
   });
   const attr = /data-options="([^"]*)"/.exec(html)[1];
@@ -340,7 +340,7 @@ test('the thread carries its options for hydration, escaped, and only those that
   assert.deepEqual(carried, {
     author: evil, typingKind: 'note', locale: 'en-US', timeZone: 'UTC', hour12: true,
     chips: [{ label: 'Hi', text: 'Hi', fill: false }], toggles: [{ name: 'close', label: evil, checked: false }],
-    strings: { placeholder: 'Mensagem', more: evil },
+    strings: { placeholder: 'Write a reply', more: evil },
   });
   assert.doesNotMatch(renderThread([], {}), /data-options/, 'nothing to carry, no attribute');
   assert.doesNotMatch(renderThread([], { mode: 'preview' }), /data-options/, 'days follow the mode by default');

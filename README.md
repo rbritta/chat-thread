@@ -78,7 +78,7 @@ No bundler and no modules? Use the classic build, which defines `window.ChatThre
 ```js
 import { renderThread } from 'chat-thread/core';      // pure: no DOM, no I/O
 
-const html = renderThread(messages, { author: 'Assistant', timeZone: 'America/Sao_Paulo', locale: 'pt-BR' });
+const html = renderThread(messages, { author: 'Assistant', timeZone: 'Europe/London', locale: 'en-GB' });
 // send html inside your page, then in the browser:
 createChat(container, { hydrate: true, onSend: (text) => post(text) });
 ```
@@ -113,8 +113,8 @@ el.innerHTML = renderThread([{ from: 'me', text: 'Hi, *Alex*! See you ~Wed~ _Thu
 | `autoScroll` | `true` | Bring a new message into view. |
 | `typing`, `waiting` | `false` | Start with the typing dots or the waiting line: `true` or a name. |
 | `typingKind` | `'auto'` | The shape of the typing dots: `bubble`, `note` (bare dots, no name, for a side that narrates) or `auto`, the shape of the other side's last message (a bubble when there is none). |
-| `strings` | English | Every visible word, e.g. `{ placeholder: 'Mensagem', send: 'Enviar', today: 'Hoje' }`. See `DEFAULT_STRINGS`. |
-| `locale` | browser | Language of the day separators and times (`'pt-BR'`, `'en-GB'`…). See [Dates and times](#dates-and-times). |
+| `strings` | English | Every visible word, e.g. `{ placeholder: 'Write a reply', send: 'Post', today: 'Earlier today' }`, or a translation. See `DEFAULT_STRINGS`. |
+| `locale` | browser | Language of the day separators and times (`'en-GB'`, `'en-US'`…). See [Dates and times](#dates-and-times). |
 | `timeZone` | browser | Time zone of the times and days, e.g. `'America/Sao_Paulo'`. Pass it when rendering on a server. |
 | `hour12` | the locale's | `true` for `5:50 PM`, `false` for `17:50`; left out, the locale decides. |
 | `hydrate` | `false` | Take over a thread already in the element (from `renderThread`) instead of drawing it, with the options it was drawn with. |
@@ -160,7 +160,7 @@ A note is the other side telling what happens, the way a booking bot or a setup 
 In the browser, the thread writes times and day separators the way the person's browser does: in its language, in its time zone and with its clock (`17:50` in Brazil, `5:50 PM` in the United States). Nothing to set for that. An app that wants something else says so:
 
 ```js
-createChat(el, { locale: 'pt-BR', strings: { today: 'Hoje', yesterday: 'Ontem' } }); // "Hoje", "sexta-feira", 17:50
+createChat(el, { locale: 'en-GB', strings: { today: 'Earlier today' } }); // "Earlier today", "Friday", 17:50
 createChat(el, { timeZone: 'America/Sao_Paulo' });     // the day and hour in Sao Paulo, wherever the browser is
 createChat(el, { locale: 'en-US', hour12: false });    // American words with a 24-hour clock
 chat.configure({ hour12: true });                       // change it later; the times redraw

@@ -15,7 +15,7 @@ export const MODES = Object.freeze(['chat', 'readonly', 'preview']);
 /** `bubble` is a message in a bubble; `note` is the other side narrating, full width, with no bubble. */
 export const KINDS = Object.freeze(['bubble', 'note']);
 
-/** Every visible word. Pass `strings` to translate: `{ placeholder: 'Mensagem', send: 'Enviar' }`. */
+/** Every visible word. Pass `strings` to reword or translate: `{ placeholder: 'Write a reply', send: 'Post' }`. */
 export const DEFAULT_STRINGS = Object.freeze({
   thread: 'Conversation',
   placeholder: 'Message',
