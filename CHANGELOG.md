@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.1 (2026-11-14)
+
+- "Show N earlier messages" in purple (`--ct-th-earlier`, `--ct-th-earlier-border`), so it is seen at a glance.
+
 ## 0.5.0 (2026-11-14)
 
 New

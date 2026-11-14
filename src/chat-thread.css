@@ -408,6 +408,8 @@
   --ct-th-ok-soft: rgba(63, 185, 80, .16);
   --ct-th-idle: #29333c;
   --ct-th-ai: #a371f7;
+  --ct-th-earlier: #c4bdff;
+  --ct-th-earlier-border: #4b4390;
   --ct-th-ai-soft: rgba(163, 113, 247, .12);
   --ct-th-av-1: #2f81f7;
   --ct-th-av-2: #9e6a03;
@@ -537,6 +539,8 @@
   --ct-th-ok-soft: rgba(26, 127, 55, .12);
   --ct-th-idle: #d0d7de;
   --ct-th-ai: #8250df;
+  --ct-th-earlier: #5847d4;
+  --ct-th-earlier-border: #b3a8f5;
   --ct-th-ai-soft: rgba(130, 80, 223, .1);
 }
 @media (prefers-color-scheme: light) {
@@ -555,12 +559,14 @@
     --ct-th-ok-soft: rgba(26, 127, 55, .12);
     --ct-th-idle: #d0d7de;
     --ct-th-ai: #8250df;
+    --ct-th-earlier: #5847d4;
+    --ct-th-earlier-border: #b3a8f5;
     --ct-th-ai-soft: rgba(130, 80, 223, .1);
   }
 }
 
 /* a long thread: only the latest messages, the rest behind "Show N earlier" */
 .ct-th .ct-th-old { display: none; }
-.ct-th-earlier { align-self: center; display: block; margin: 8px auto 0; padding: 4px 12px; border: 1px solid var(--ct-th-border); border-radius: 999px; background: none; color: var(--ct-muted, #98a1ab); font: inherit; font-size: 12.5px; cursor: pointer; }
-.ct-th-earlier:hover { color: var(--ct-text, #e6e9ec); }
+.ct-th-earlier { align-self: center; display: block; margin: 8px auto 0; padding: 4px 12px; border: 1px solid var(--ct-th-earlier-border); border-radius: 999px; background: none; color: var(--ct-th-earlier); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }
+.ct-th-earlier:hover { border-color: var(--ct-th-earlier); }
 .ct-th-earlier:focus-visible { outline: 2px solid var(--ct-th-busy); outline-offset: 2px; }
