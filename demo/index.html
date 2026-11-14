@@ -115,6 +115,15 @@
       </div>
     </section>
 
+    <section id="threads" class="demo demo--wide">
+      <h2>Threads <small>createThreads · resolved on top · one message box · branch</small></h2>
+      <p class="note">Several subjects in one place, in the order they were opened. A resolved thread folds into one line in its place, behind <em>Show N resolved</em>. Only the open thread you are in has a message box; the purple button right of Send (or Ctrl+Shift+Enter) opens a new thread with the text. Left: the default <code>conversation</code> header, for people (an AI on the way may name the thread, marked with ✦). Right: the <code>questions</code> header, for an AI session.</p>
+      <div class="themes">
+        <div><p class="label">Conversation</p><div data-threads="team"></div></div>
+        <div><p class="label">Questions</p><div data-threads="session"></div></div>
+      </div>
+    </section>
+
     <section id="themes" class="demo demo--wide">
       <h2>Light and auto <small>notes with no bubble · typing as a note · chips · alert</small></h2>
       <p class="note">A booking assistant narrates in notes across the whole width; only the person's messages are bubbles, and while it writes, its typing dots have no bubble either. This one is <code>theme: 'light'</code>, a light app that stays light whatever the switch says. The reminders beside it are <code>theme: 'auto'</code> like the rest of the page: the system decides, or <code>&lt;html data-theme&gt;</code> when the switch sets it.</p>
@@ -135,6 +144,28 @@
 
   <script type="application/json" id="demo-data">
   {
+    "threadsTeam": [
+      { "id": "t1", "when": [2, "09:10"], "status": "resolved", "resolvedBy": "Ana", "participants": [{ "name": "Ana" }, { "name": "Bruno" }], "messages": [
+        { "from": "other", "author": "Ana", "when": [2, "09:10"], "text": "Can we move the release to Thursday?" },
+        { "from": "me", "when": [2, "09:14"], "state": "read", "text": "Thursday works." }
+      ] },
+      { "id": "t2", "when": [1, "10:02"], "tone": "wait", "title": "Invoice for the October hosting", "titleBy": "Assistant", "titleByAI": true, "participants": [{ "name": "Ana" }, { "name": "Assistant" }], "messages": [
+        { "from": "other", "author": "Ana", "when": [1, "10:02"], "text": "hey, the hosting bill came in twice?" },
+        { "from": "other", "author": "Assistant", "when": [1, "10:03"], "text": "Two charges of **$42** on Oct 3 and Oct 4. The second one looks like a retry." }
+      ] },
+      { "id": "t3", "when": [1, "11:30"], "tone": "idle", "participants": [{ "name": "Bruno" }], "messages": [
+        { "from": "other", "author": "Bruno", "when": [1, "11:30"], "text": "Lunch at noon?" }
+      ] }
+    ],
+    "threadsSession": [
+      { "id": "q1", "n": 1, "when": [1, "08:40"], "status": "resolved", "title": "Battery alert above 85%", "origin": "from the app", "messages": [
+        { "from": "me", "when": [1, "08:40"], "state": "read", "text": "The phone did not alert at 85%." },
+        { "from": "other", "when": [1, "08:52"], "text": "Fixed: the watcher now starts at boot." }
+      ] },
+      { "id": "q2", "n": 2, "when": [1, "09:05"], "tone": "busy", "activity": "Running the tests", "title": "Same watcher on the second phone", "origin": "typed in the IDE", "messages": [
+        { "from": "me", "when": [1, "09:05"], "state": "read", "text": "Does the second phone need the same watcher?" }
+      ] }
+    ],
     "task": {
       "options": { "theme": "auto", "author": "Session 2", "clamp": 300, "strings": { "placeholder": "Message to Session 2" }, "toggles": [{ "name": "close", "label": "Close the session when done" }] },
       "reply": "Got it: I'll pick that up right after the current step.",

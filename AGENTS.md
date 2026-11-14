@@ -63,6 +63,13 @@ export function Transcript({ messages }) {
 
 `dangerouslySetInnerHTML={{ __html: renderThread(...) }}` works the same and also renders on a React server. For Read more and Copy to respond, add `createChat(box.current, { hydrate: true, mode: 'readonly' })` in the effect and `destroy()` in its cleanup.
 
+## Threads in an app
+
+- One app thread (an issue, a question, a subject) is one entry of `threads`; map it in one small function, like messages: `{ id, n?, title?, titleBy?, titleByAI?, at, status: "open" | "resolved", resolvedBy?, tone: "wait" | "busy" | "idle", label?, activity?, origin?, parent?, participants: [{ name }], messages }`.
+- Keep the thread list in step with `upsert(patch)` (it adds what is new and changes only the fields given; `messages` replaces the list through the chat's `update`), `append` for one message, `resolve`/`reopen` when the other side decides. Do not redraw the container on a poll: that loses the focus and the text being typed.
+- `onNewThread(text, parentId)` must return the new thread (or a promise of it). It is called from the bottom box (`parentId` null) and from Branch.
+- Use `mode: "questions"` when the other side is an AI session with numbered questions; `conversation` everywhere else.
+
 ## Shapes
 
 ```js
@@ -84,13 +91,14 @@ store.threads({ limit? }) -> { threads: [{ thread, count, last }] }
 
 - `src/core.js` holds every rule that has no DOM: formats, times, options and all the HTML. Test it there (`test/core.test.js`). The server and the browser draw with the same functions, so a markup change is made once.
 - `src/chat-thread.js` is the DOM: events, the growing box, Read more, Copy, ×, and the browser stores. Its behavior is covered by `test/chat-thread.browser.test.js` (real Chrome through playwright-core, headless).
+- `src/threads.js` is `createThreads`: many threads under headers, built from one `createChat` per thread. It adds to each thread's composer only the Branch button (put back if a redraw takes it), hides every composer but the active thread's with CSS, and never draws inside the chat itself. Its classes start with `ct-th`; its colors are `--ct-th-*` on `.ct-threads`, light written twice like the thread's. Covered by `test/threads.browser.test.js` on the demo's Threads section.
 - `server/` is Node only and must keep working with both `node:sqlite` and better-sqlite3 (only `exec` and `prepare().run/get/all`).
 - A theme is a block of `--ct-*` values and nothing else. `light` is written twice in `chat-thread.css` (once for `.ct--light` and `data-theme="light"`, once inside the `prefers-color-scheme: light` query): change both, and keep the `:where()` around the page selectors so an app's own properties still win. `test/chat-thread.browser.test.js` checks the colors and measures WCAG AA for every theme on its bubbles and on the page behind it.
 - Every class starts with `ct-`. The markup has no `style` attribute and no inline handler: sizes the script changes go through `element.style` (CSSOM), which a strict CSP allows. Keep it that way; `test/core.test.js` checks it.
 - Motion goes through `element.animate` in `chat-thread.js` (also CSP-safe): about 200 ms, eased out, and nothing when `prefers-reduced-motion` asks for less. It must end exactly where the layout ends (the browser test pauses an animation near its end and compares). The browser tests run with reduced motion unless a test asks for it.
 - The thread is a `role="log"`: it announces what is added to it. Put no other live region inside it, and change the whole list through `quietly()` so a reload is not read out.
 - Everything rendered is escaped with `escapeHtml`; URLs go through `safeUrl`. My own text is `renderPlain` (as written); only the other side gets markdown by default.
-- No runtime dependencies. No build step for ESM users. After changing `src/`, run `npm run build` and commit `dist/` (CI fails when `dist/` is stale). Top-level names in `core.js` and `chat-thread.js` must not collide: the build concatenates them, and refuses to build when they do.
+- No runtime dependencies. No build step for ESM users. After changing `src/`, run `npm run build` and commit `dist/` (CI fails when `dist/` is stale). Top-level names in `core.js`, `chat-thread.js` and `threads.js` must not collide: the build concatenates them, and refuses to build when they do.
 - Run `npm test` before committing. If the look changed, run `npm run screenshots` and commit `docs/`.
 - The demo data is made up and lives in the JSON block of `demo/index.html`. Never put real names, messages or numbers there.
 - The demo's theme switch is `demo/theme.js` (a classic script in `<head>`, so the remembered choice paints first). Every example except the WhatsApp previews and the fixed-light booking uses `theme: 'auto'`; the page's own colors are tokens in `demo/demo.css`, light written twice like the library's.

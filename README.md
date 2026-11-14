@@ -171,6 +171,41 @@ chat.configure({ hour12: true });                       // change it later; the 
 - A locale or a zone the runtime does not know falls back to the runtime's own, one at a time, instead of throwing.
 - **On a server there is no browser to follow.** `renderThread` there uses the server's own language and zone, which are rarely the reader's. Pass the reader's `locale` and `timeZone` (from the account, a cookie, or `Accept-Language`), or fix them for the whole app. The thread carries them in `data-options`, so the messages the browser adds later read the same.
 
+## Threads
+
+Several subjects in one place, each a full thread under a header: a support desk with one thread per issue, a team channel, an AI session with numbered questions.
+
+```js
+import { createThreads } from 'chat-thread';
+
+const box = createThreads(element, {
+  threads: [
+    { id: 't1', at: '2026-11-13T09:10:00Z', status: 'resolved', resolvedBy: 'Ana', participants: [{ name: 'Ana' }], messages: [...] },
+    { id: 't2', at: '2026-11-14T10:02:00Z', tone: 'wait', participants: [{ name: 'Ana' }, { name: 'Assistant' }], messages: [...] },
+  ],
+  chat: { author: 'Ana', theme: 'auto' },                 // the options of every thread's createChat
+  onSend: (id, text) => api.send(id, text),               // like createChat's onSend, with the thread
+  onNewThread: (text, parentId) => api.open(text, parentId), // returns the new thread (or a promise of it)
+  onResolve: (id) => api.resolve(id),
+});
+
+box.upsert({ id: 't2', tone: 'busy', activity: 'Looking it up' });  // typing dots and an activity line
+box.append('t2', { from: 'other', author: 'Ana', text: 'Done.' });
+box.resolve('t2', 'Ana');                                           // from outside, too
+box.rename('t2', 'Hosting charged twice', 'Assistant', true);       // an AI's title gets the ✦ mark
+```
+
+- **Order:** threads stay in the order they were opened (`at`). A resolved thread folds into one line in its place, hidden behind "Show N resolved" at the top.
+- **One message box:** only the active thread (the open one you last touched) has a box. With none open, a box at the bottom starts a new thread; what you type there goes to the new thread.
+- **Branch:** the button right of Send, or Ctrl+Shift+Enter, opens a new thread with the text instead of sending it, derived from the thread you are in (`onNewThread(text, parentId)`; the header shows where it came from).
+- **Title:** what someone gave (`title`, renamed with the pencil or `rename()`); without one, the first line of the first message. `titleByAI` marks a title an AI gave.
+- **State:** `tone` is `wait` (your turn), `busy` (the other side is working: typing dots, and `activity` above the box), or `idle`. `label` replaces the words.
+- **Headers:** `mode: 'conversation'` (the default: avatars, title, who, how many, when, for people with or without an AI in between) or `mode: 'questions'` (a badge `Qn` colored by the state, with `n` and `origin`, for AI sessions). `header: (thread, { strings, preview, when, escapeHtml, headers }) => html` draws your own; call `headers.conversation(thread, ctx)` inside it to start from the default.
+- **Words:** `strings` over `THREAD_STRINGS`; the threads' own messages use `chat.strings`.
+- **Colors:** `--ct-th-*` custom properties on the container, with the same `theme` (`dark`, `light`, `auto`) as the thread.
+
+The controller also has `threads()`, `get(id)`, `chat(id)` (that thread's createChat controller), `remove`, `reopen`, `open`, `close`, `updateMessage(id, messageId, patch)`, `setMode`, `setHeader`, `active` and `destroy`.
+
 ## Themes
 
 | `theme` | What it is | For |
