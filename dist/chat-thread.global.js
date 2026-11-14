@@ -1,4 +1,4 @@
-/*! chat-thread v0.3.0 | MIT | https://github.com/rbritta/chat-thread */
+/*! chat-thread v0.4.0 | MIT | https://github.com/rbritta/chat-thread */
 (function (global) {
 'use strict';
 /**
@@ -61,7 +61,7 @@ const DEFAULTS = Object.freeze({
   toggles: Object.freeze([]),
   locale: undefined,
   timeZone: undefined,
-  hour12: false,
+  hour12: undefined,
 });
 
 const RESOLVED = Symbol('chat-thread options');
@@ -98,6 +98,7 @@ function resolveOptions(options = {}) {
   o.chips = normalizeChips(o.chips);
   o.toggles = normalizeToggles(o.toggles);
   if (!STATES.includes(o.sendState)) o.sendState = null;
+  if (typeof o.hour12 !== 'boolean') o.hour12 = undefined;
   o.now = typeof given.now === 'function' ? given.now : () => new Date();
   o[RESOLVED] = true;
   return o;
@@ -340,11 +341,21 @@ function dayKey(at, { timeZone } = {}) {
   return `${get('year')}-${get('month')}-${get('day')}`;
 }
 
-/** The time shown inside a bubble: `17:50`, or `5:50 PM` with `hour12`. */
-function formatTime(at, { locale, timeZone, hour12 = false } = {}) {
+/** Whether the locale writes `5:50 PM` (12 hours) rather than `17:50`, as its own clock does. */
+function usesTwelveHours(locale, timeZone) {
+  const cycle = formatter(locale, { timeZone, hour: 'numeric' }).resolvedOptions().hourCycle;
+  return cycle === 'h11' || cycle === 'h12';
+}
+
+/**
+ * The time shown inside a bubble. The locale decides between `17:50` and `5:50 PM`, like the rest of the
+ * page; `hour12: true` or `false` forces one of them.
+ */
+function formatTime(at, { locale, timeZone, hour12 } = {}) {
   const d = toDate(at);
   if (!d) return '';
-  const opts = hour12 ? { timeZone, hour: 'numeric', minute: '2-digit', hour12: true } : { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' };
+  const twelve = typeof hour12 === 'boolean' ? hour12 : usesTwelveHours(locale, timeZone);
+  const opts = twelve ? { timeZone, hour: 'numeric', minute: '2-digit', hour12: true } : { timeZone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' };
   return formatter(locale, opts).format(d);
 }
 

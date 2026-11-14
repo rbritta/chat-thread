@@ -114,9 +114,9 @@ el.innerHTML = renderThread([{ from: 'me', text: 'Hi, *Alex*! See you ~Wed~ _Thu
 | `typing`, `waiting` | `false` | Start with the typing dots or the waiting line: `true` or a name. |
 | `typingKind` | `'auto'` | The shape of the typing dots: `bubble`, `note` (bare dots, no name, for a side that narrates) or `auto`, the shape of the other side's last message (a bubble when there is none). |
 | `strings` | English | Every visible word, e.g. `{ placeholder: 'Mensagem', send: 'Enviar', today: 'Hoje' }`. See `DEFAULT_STRINGS`. |
-| `locale` | browser | Language of the day separators and times. |
-| `timeZone` | browser | Time zone of the times and days, e.g. `'America/Sao_Paulo'` when rendering on a server. |
-| `hour12` | `false` | `5:50 PM` instead of `17:50`. |
+| `locale` | browser | Language of the day separators and times (`'pt-BR'`, `'en-GB'`…). See [Dates and times](#dates-and-times). |
+| `timeZone` | browser | Time zone of the times and days, e.g. `'America/Sao_Paulo'`. Pass it when rendering on a server. |
+| `hour12` | the locale's | `true` for `5:50 PM`, `false` for `17:50`; left out, the locale decides. |
 | `hydrate` | `false` | Take over a thread already in the element (from `renderThread`) instead of drawing it, with the options it was drawn with. |
 | `onSend` | none | `(text, { toggles, message, chat })` after a message is sent. Return a message object to replace the draft (its `id`, `state`...). Throw to mark it failed (`state: 'failed'`, a red mark labelled "Not sent"). |
 | `onRemove` | none | `(message)` when × takes back a queued message. |
@@ -154,6 +154,22 @@ chat.append({ from: 'other', kind: 'note', text: 'Friday has **three** times ope
 ```
 
 A note is the other side telling what happens, the way a booking bot or a setup assistant talks: no bubble, no author line, no ticks, across the whole width in the theme's text color. It is markdown on either side, and Read more, Copy, `title`, `tag` and `alert` (a bar on the left) work as in a bubble. When the message has `at`, its time sits below the text in the muted color; `--ct-note-meta: none` hides it. `renderThread` draws the same note on a server. For a bot that only narrates, give its messages `kind: 'note'` in the app's mapping function and leave the person's as bubbles. While it writes, its typing dots are bare too, on the left with no bubble and no name: `typingKind: 'auto'` (the default) takes the shape of the other side's last message, and `typingKind: 'note'` asks for it before there is one.
+
+## Dates and times
+
+In the browser, the thread writes times and day separators the way the person's browser does: in its language, in its time zone and with its clock (`17:50` in Brazil, `5:50 PM` in the United States). Nothing to set for that. An app that wants something else says so:
+
+```js
+createChat(el, { locale: 'pt-BR', strings: { today: 'Hoje', yesterday: 'Ontem' } }); // "Hoje", "sexta-feira", 17:50
+createChat(el, { timeZone: 'America/Sao_Paulo' });     // the day and hour in Sao Paulo, wherever the browser is
+createChat(el, { locale: 'en-US', hour12: false });    // American words with a 24-hour clock
+chat.configure({ hour12: true });                       // change it later; the times redraw
+```
+
+- `locale` picks the words of the day separators (the weekday, then the date) and, unless `hour12` says otherwise, 12 or 24 hours as that language writes them. "Today" and "Yesterday" are `strings` (`today`, `yesterday`).
+- `timeZone` decides the day as well as the hour: a message sent at 01:30 UTC sits under "Today" in London and under "Yesterday" in São Paulo.
+- A locale or a zone the runtime does not know falls back to the runtime's own, one at a time, instead of throwing.
+- **On a server there is no browser to follow.** `renderThread` there uses the server's own language and zone, which are rarely the reader's. Pass the reader's `locale` and `timeZone` (from the account, a cookie, or `Accept-Language`), or fix them for the whole app. The thread carries them in `data-options`, so the messages the browser adds later read the same.
 
 ## Themes
 

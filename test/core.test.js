@@ -72,8 +72,13 @@ test('times and day labels follow the time zone and the locale', () => {
   assert.equal(dayKey('2026-11-13T02:30:00Z', { timeZone: 'America/Sao_Paulo' }), '2026-11-12');
   assert.equal(dayKey('2026-11-13T02:30:00Z', { timeZone: 'UTC' }), '2026-11-13');
   assert.equal(dayKey('nope'), '');
-  assert.equal(formatTime('2026-11-13T17:05:00Z', UTC), '17:05');
-  assert.equal(formatTime('2026-11-13T17:05:00Z', { ...UTC, hour12: true }), '5:05 PM');
+  // 12 or 24 hours: the locale decides, like the rest of the page; hour12 forces one of them
+  assert.equal(formatTime('2026-11-13T17:05:00Z', UTC), '5:05 PM');
+  assert.equal(formatTime('2026-11-13T17:05:00Z', { timeZone: 'UTC', locale: 'pt-BR' }), '17:05');
+  assert.equal(formatTime('2026-11-13T09:05:00Z', { timeZone: 'UTC', locale: 'en-GB' }), '09:05');
+  assert.equal(formatTime('2026-11-13T17:05:00Z', { ...UTC, hour12: false }), '17:05');
+  assert.equal(formatTime('2026-11-13T17:05:00Z', { timeZone: 'UTC', locale: 'pt-BR', hour12: true }).startsWith('5:05'), true);
+  assert.equal(resolveOptions({ hour12: 'yes' }).hour12, undefined, 'only true or false force it');
   assert.equal(formatTime('2026-11-13T17:05:00Z', { timeZone: 'Bad/Zone' }).length > 0, true, 'a bad zone falls back instead of throwing');
   const opts = { now: NOW(), ...UTC };
   assert.equal(dayLabel('2026-11-13', opts), 'Today');
@@ -109,7 +114,7 @@ test('resolveOptions fills defaults and replaces bad values', () => {
 });
 
 test('a bubble: side, author only on the other side, time, ticks by state', () => {
-  const opts = { ...UTC, now: NOW, author: 'Assistant' };
+  const opts = { ...UTC, hour12: false, now: NOW, author: 'Assistant' };
   const mine = renderMessage({ id: 1, from: 'me', text: 'hi **there**', at: '2026-11-13T17:50:00Z' }, opts);
   assert.match(mine, /^<div class="ct-msg ct-msg--mine" data-id="1" data-day="2026-11-13">/);
   assert.doesNotMatch(mine, /ct-author/);
@@ -151,7 +156,7 @@ test('formats: theirs markdown and mine plain by default; whatsapp for everyone 
 });
 
 test('a note: no bubble, no author, no ticks, markdown, the time on its own line', () => {
-  const opts = { ...UTC, now: NOW, author: 'Assistant', colorAuthors: true };
+  const opts = { ...UTC, hour12: false, now: NOW, author: 'Assistant', colorAuthors: true };
   const note = renderMessage({ id: 4, from: 'other', kind: 'note', text: 'Friday has **three** times:\n- 10:30\n- 14:00', at: '2026-11-13T10:03:00Z' }, opts);
   assert.equal(note, '<div class="ct-msg ct-msg--note" data-id="4" data-day="2026-11-13"><div class="ct-body"><p>Friday has <strong>three</strong> times:</p><ul><li>10:30</li><li>14:00</li></ul></div><span class="ct-meta"><time datetime="2026-11-13T10:03:00.000Z">10:03</time></span></div>');
   assert.equal(renderMessage({ kind: 'note', text: 'no time' }, opts), '<div class="ct-msg ct-msg--note"><div class="ct-body"><p>no time</p></div></div>', 'no at, no time');

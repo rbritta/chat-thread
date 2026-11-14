@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0 (2026-11-14)
+
+Dates and times follow the browser, and the app can say otherwise.
+
+- `hour12` now defaults to the locale's own clock: `17:50` in Brazil or Britain, `5:50 PM` in the United States. It used to be always 24 hours; pass `hour12: false` to keep that.
+- README: a "Dates and times" section with examples, and what to pass when the thread is drawn on a server, where there is no browser to follow.
+
 ## 0.3.0 (2026-11-13)
 
 A full review: safer links, a server-rendered thread that hydrates with its own options, quiet motion, accessibility, and every example of the demo in light and dark. Nothing in the API was renamed or removed.
