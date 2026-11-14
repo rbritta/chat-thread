@@ -2,11 +2,11 @@
 
 A WhatsApp-style conversation thread for any app that talks: to a person, a group, an AI or a background job. My messages on the right with time and ticks, the other side on the left with its name, a safe markdown subset with copyable code, and a pill box that grows as you type.
 
-Vanilla JS, zero runtime dependencies, about 38 kB unminified. The HTML comes from a pure function, so a server draws the same thread the browser does. A SQLite store and an HTTP handler for Node come with it.
+Vanilla JS, zero runtime dependencies, about 39 kB unminified. The HTML comes from a pure function, so a server draws the same thread the browser does. A SQLite store and an HTTP handler for Node come with it.
 
 ![A task thread: plan, a long answer behind "Read more", a queued message and the box](docs/thread.png)
 
-**[Live demo](https://rbritta.github.io/chat-thread/demo/)** · [Use it](#use-it) · [Options](#options) · [Messages](#messages) · [Server](#server) · [For AI agents](AGENTS.md) · [Roadmap](TODO.md)
+**[Live demo](https://rbritta.github.io/chat-thread/demo/)** · [Use it](#use-it) · [Options](#options) · [Messages](#messages) · [Themes](#themes) · [Server](#server) · [For AI agents](AGENTS.md) · [Roadmap](TODO.md)
 
 ## What it does
 
@@ -19,8 +19,9 @@ Vanilla JS, zero runtime dependencies, about 38 kB unminified. The HTML comes fr
 - **Day separators:** Today, Yesterday, the weekday, then the date, in your time zone and language.
 - **Queued and alert messages:** a message waiting for its turn is dashed with a clock and a × to take it back; an alert gets a red border.
 - **A box that behaves:** a pill that grows from one to six lines, Enter sends, Shift+Enter breaks the line, a round Send button that stays off while empty, suggestion chips above it and checkboxes below it.
+- **Notes without a bubble:** a bot or a system that narrates writes across the whole width with `kind: 'note'`, while the person's messages stay in bubbles.
 - **Three modes:** `chat`, `readonly` (a log, no box) and `preview` (what the other phone will show).
-- **Themes are CSS variables.** Dark green by default; `theme: 'whatsapp'` is the light WhatsApp look, with the tail and blue ticks. Repaint for your app by setting a few `--ct-*` properties.
+- **Dark, light or auto.** Dark green by default, `light` for light apps, `auto` to follow the page's `data-theme` or the system, and `whatsapp` for the WhatsApp look with the tail and blue ticks. All of it is CSS variables: repaint for your app by setting a few `--ct-*` properties.
 - **CSP-safe.** No `eval`, no inline styles or handlers in the markup, data in by JSON. The demo runs under `default-src 'self'`.
 - **Phones too.** No horizontal scroll at 360 px; code blocks scroll inside their bubble.
 
@@ -93,7 +94,7 @@ el.innerHTML = renderThread([{ from: 'me', text: 'Hi, *Alex*! See you ~Wed~ _Thu
 | `messages` | `[]` | The messages to draw, if you load them yourself instead of `reload()`. See [Messages](#messages). |
 | `store` | `null` | Where sending and removing go: `restStore(url)`, `memoryStore(list)`, `localStore(name)` or your own `{ load, send, remove? }`. |
 | `mode` | `'chat'` | `chat` (with the box), `readonly` (no box) or `preview` (no box, no day separators). |
-| `theme` | `'dark'` | `whatsapp` for the light WhatsApp look. Any other name adds the class `ct--<name>` for your own CSS. |
+| `theme` | `'dark'` | `light`, `auto` or `whatsapp`: see [Themes](#themes). Any other name adds the class `ct--<name>` for your own CSS. |
 | `format` | `'auto'` | `auto`: markdown for the other side, plain for mine. Or `markdown`, `whatsapp`, `plain` for every message. A message can set its own. |
 | `author` | `''` | The name shown on the other side when a message has none. Also used by `setTyping(true)` and `setWaiting(true)`. |
 | `colorAuthors` | `false` | Give each author in a group a stable color (six slots, `--ct-author-1` to `-6`). |
@@ -120,7 +121,7 @@ el.innerHTML = renderThread([{ from: 'me', text: 'Hi, *Alex*! See you ~Wed~ _Thu
 
 The returned chat has `append(message)`, `updateMessage(id, patch)`, `update({ messages?, typing?, waiting? })`, `setTyping(value)`, `setWaiting(value)`, `send(text)`, `reload()`, `configure(options)`, `focus()`, `messages`, `el`, `composer` and `destroy()`. A message from the other side passed to `append` clears the typing dots and the waiting line.
 
-`core.js` exports the pure pieces: `renderThread`, `renderList`, `renderMessage`, `renderComposer`, `renderMarkdown`, `renderWhatsApp`, `renderPlain`, `normalizeMessage`, `formatTime`, `dayKey`, `dayLabel`, `escapeHtml`, `safeUrl`, `linkify`, `DEFAULT_STRINGS`, `DEFAULTS` and `LIMITS`.
+`core.js` exports the pure pieces: `renderThread`, `renderList`, `renderMessage`, `renderComposer`, `renderMarkdown`, `renderWhatsApp`, `renderPlain`, `normalizeMessage`, `formatTime`, `dayKey`, `dayLabel`, `escapeHtml`, `safeUrl`, `linkify`, `DEFAULT_STRINGS`, `DEFAULTS`, `KINDS` and `LIMITS`.
 
 ## Messages
 
@@ -128,6 +129,7 @@ The returned chat has `append(message)`, `updateMessage(id, patch)`, `update({ m
 {
   id,          // number or string, stable: the × and updateMessage use it
   from,        // 'me' (right) or 'other' (left)
+  kind,        // 'bubble' (default) or 'note': no bubble, the whole width
   author,      // the name on the left: 'Assistant', 'Session 2', 'Dana'
   text,        // up to 20,000 characters
   at,          // ISO time
@@ -140,6 +142,35 @@ The returned chat has `append(message)`, `updateMessage(id, patch)`, `update({ m
 }
 ```
 
+### Notes: a narrator without a bubble
+
+```js
+chat.append({ from: 'other', kind: 'note', text: 'Friday has **three** times open:\n- 10:30\n- 14:00' });
+```
+
+A note is the other side telling what happens, the way a booking bot or a setup assistant talks: no bubble, no author line, no ticks, across the whole width in the theme's text color. It is markdown on either side, and Read more, Copy, `title`, `tag` and `alert` (a bar on the left) work as in a bubble. When the message has `at`, its time sits below the text in the muted color; `--ct-note-meta: none` hides it. `renderThread` draws the same note on a server. For a bot that only narrates, give its messages `kind: 'note'` in the app's mapping function and leave the person's as bubbles.
+
+## Themes
+
+| `theme` | What it is | For |
+| --- | --- | --- |
+| `dark` (default) | The dark green palette | Dark apps |
+| `light` | Its light twin: soft green for mine, white for theirs, near-black text. Text, muted text and links pass WCAG AA on both bubbles and on `#f5f6f8` | Light apps |
+| `auto` | `dark` or `light`, chosen by the page, with CSS only | Apps with their own light/dark switch, or none |
+| `whatsapp` | The light WhatsApp look, with the tail and blue ticks | Previews of what the other phone will show |
+
+![Theme light: a booking assistant narrating in notes, the person's messages in bubbles, suggestion chips](docs/light.png)
+
+`auto` follows one convention, the one most sites with a theme switch already use:
+
+1. `<html data-theme="light">` makes it light, `<html data-theme="dark">` makes it dark.
+2. With no `data-theme` (or any other value), the system decides through `prefers-color-scheme`.
+3. Without a word for light from either, it stays dark.
+
+An app whose switch sets `data-theme` on `<html>` needs nothing more: the thread changes with the page, no script involved. An app that marks its theme some other way (a class, another attribute) can also set `data-theme`, or pass `theme: 'light'` or `'dark'` itself and call `chat.configure({ theme })` when its switch changes. Its own `--ct-*` properties on the container always win over `light` and `auto`.
+
+![Theme auto with the system light and with the system dark](docs/auto-light-dark.png)
+
 ## Styling
 
 Everything is a custom property on `.ct`. Set a few on your container to fit your app:
@@ -148,7 +179,7 @@ Everything is a custom property on `.ct`. Set a few on your container to fit you
 .my-panel .ct { --ct-theirs: #1c232c; --ct-theirs-border: #2a323d; --ct-font-size: 13.5px; }
 ```
 
-The main ones: `--ct-mine`, `--ct-mine-border`, `--ct-theirs`, `--ct-theirs-border`, `--ct-text`, `--ct-muted`, `--ct-tick`, `--ct-link`, `--ct-hover`, `--ct-author`, `--ct-title`, `--ct-field`, `--ct-field-border`, `--ct-focus`, `--ct-send`, `--ct-alert`, `--ct-day`, `--ct-font`, `--ct-font-size`, `--ct-max-width`. Links have no underline and turn `--ct-hover` (`#6e7681`) on hover. The thread has no background of its own: it sits on yours.
+The main ones: `--ct-mine`, `--ct-mine-border`, `--ct-theirs`, `--ct-theirs-border`, `--ct-text`, `--ct-muted`, `--ct-tick`, `--ct-link`, `--ct-hover`, `--ct-author`, `--ct-title`, `--ct-field`, `--ct-field-border`, `--ct-focus`, `--ct-send`, `--ct-alert`, `--ct-day`, `--ct-font`, `--ct-font-size`, `--ct-max-width`, `--ct-note-meta`. Links have no underline and turn `--ct-hover` (`#6e7681`) on hover. The thread has no background of its own: it sits on yours.
 
 ## Server
 
@@ -178,7 +209,7 @@ store.add('support', { from: 'other', author: 'Assistant', text: 'Done.' });
 | `POST /api/chat/:thread` | `{ text, state?, meta? }` | the message, always `from: 'me'`; `state` only `pending`, `queued` or `sent` |
 | `PATCH /api/chat/:thread/:id` | `{ removed: true }` | `{ ok, id }`, only for my own messages |
 
-The browser can only write as `me`; replies and state changes (`store.update(thread, id, { state: 'read' })`, a streamed `{ text }`) come from your server. If a framework already read the body, `req.body` is used. Nothing is deleted: removed messages keep their row with a timestamp. `onChange` gets every `add`, `update` and `remove`.
+The browser can only write as `me`, and only bubbles; notes (`store.add(thread, { kind: 'note', text })`), replies and state changes (`store.update(thread, id, { state: 'read' })`, a streamed `{ text }`) come from your server. If a framework already read the body, `req.body` is used. Nothing is deleted: removed messages keep their row with a timestamp. `onChange` gets every `add`, `update` and `remove`. A table made by 0.1.0 gets the `kind` column the first time a store opens it.
 
 ## Develop
 

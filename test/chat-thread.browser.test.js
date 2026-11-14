@@ -28,8 +28,10 @@ after(async () => {
   server?.close();
 });
 
-async function page(width = 1200, height = 900) {
-  const ctx = await browser.newContext({ viewport: { width, height } });
+async function page(width = 1200, height = 900, { colorScheme = 'dark' } = {}) {
+  const ctx = await browser.newContext({ viewport: { width, height }, colorScheme });
+  // every CSP violation lands in the errors, even one the console would not show
+  await ctx.addInitScript(() => document.addEventListener('securitypolicyviolation', (e) => console.error(`CSP: ${e.violatedDirective} ${e.blockedURI}`)));
   const p = await ctx.newPage();
   const errors = [];
   p.on('pageerror', (e) => errors.push(e.message));
@@ -55,6 +57,10 @@ test('the demo renders every mode with no errors and no CSP violations', async (
   assert.equal(await count(`${thread('log')} .ct-author--1, ${thread('log')} .ct-author--2`), 2, 'two group authors, two colors');
   assert.equal(await count('.ct--whatsapp.ct--preview'), 2);
   assert.equal(await count('.ct--preview .ct-day'), 0);
+  assert.equal(await count(`${thread('booking')} .ct.ct--light`), 1);
+  assert.equal(await count(`${thread('booking')} .ct-msg--note`), 2);
+  assert.equal(await count(`${thread('reminders')} .ct.ct--auto`), 1);
+  assert.equal(await count(`${thread('reminders')} .ct-msg--note.ct-msg--alert`), 1);
   assert.equal(await p.locator(`${thread('task')} .ct-day`).first().textContent(), 'Today');
   const weekday = await p.evaluate(() => new Date(Date.now() - 3 * 864e5).toLocaleDateString(undefined, { weekday: 'long' }));
   assert.equal((await p.locator(`${thread('log')} .ct-day`).textContent()).toLowerCase(), weekday.toLowerCase());
@@ -174,6 +180,180 @@ test('links have no underline and turn gray on hover', async (t) => {
   await ctx.close();
 });
 
+// WCAG contrast ratio of two computed colors, run inside the page
+function contrastIn(page, pairs) {
+  return page.evaluate((list) => {
+    const lum = (c) => {
+      const [r, g, b] = c.match(/[\d.]+/g).slice(0, 3).map((v) => { const x = v / 255; return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4; });
+      return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    };
+    return list.map(([a, b]) => { const [x, y] = [lum(a), lum(b)].sort((p, q) => q - p); return (x + 0.05) / (y + 0.05); });
+  }, pairs);
+}
+
+test('light: its palette, text that passes AA on both bubbles and on the page, a dark page around it changes nothing', async (t) => {
+  if (!browser) return t.skip('no browser');
+  const { p, ctx, errors } = await page();
+  const found = await p.evaluate(() => {
+    const ct = document.querySelector('[data-thread="booking"] .ct');
+    const style = (el, prop = 'backgroundColor') => getComputedStyle(el)[prop];
+    // a bubble from the other side, drawn with the same theme next to the thread, to read its colors
+    const extra = document.createElement('div');
+    extra.className = 'ct ct--light';
+    extra.innerHTML = '<div class="ct-list"><div class="ct-msg ct-msg--theirs"><div class="ct-body"><p>x</p></div></div></div>';
+    ct.parentElement.append(extra);
+    const colors = {};
+    for (const name of ['text', 'muted', 'link', 'author', 'title', 'tick', 'author-1', 'author-2', 'author-3', 'author-4', 'author-5', 'author-6']) {
+      const span = document.createElement('span');
+      span.style.color = `var(--ct-${name})`;
+      extra.append(span);
+      colors[name] = getComputedStyle(span).color;
+    }
+    const mine = ct.querySelector('.ct-msg--mine');
+    const link = ct.querySelector('.ct-msg--note a');
+    const out = {
+      backgrounds: { mine: style(mine), theirs: style(extra.querySelector('.ct-msg--theirs')), page: style(ct.closest('.frame')) },
+      colors,
+      text: style(ct, 'color'),
+      border: style(mine, 'borderTopColor'),
+      field: style(ct.querySelector('.ct-field')),
+      send: style(ct.querySelector('.ct-send')),
+      link: style(link, 'color'),
+      underline: style(link, 'textDecorationLine'),
+      scheme: style(ct, 'colorScheme'),
+    };
+    extra.remove();
+    return out;
+  });
+  assert.deepEqual(found.backgrounds, { mine: 'rgb(227, 249, 232)', theirs: 'rgb(255, 255, 255)', page: 'rgb(245, 246, 248)' });
+  assert.deepEqual([found.text, found.border, found.field, found.send, found.link, found.underline, found.scheme],
+    ['rgb(31, 35, 40)', 'rgb(180, 226, 192)', 'rgb(255, 255, 255)', 'rgb(31, 136, 61)', 'rgb(9, 105, 218)', 'none', 'light']);
+
+  const pairs = [];
+  for (const name of ['text', 'muted', 'link', 'tick']) for (const where of ['mine', 'theirs', 'page']) pairs.push([name, where]);
+  for (const name of ['author', 'title', 'author-1', 'author-2', 'author-3', 'author-4', 'author-5', 'author-6']) pairs.push([name, 'theirs']);
+  const ratios = await contrastIn(p, pairs.map(([name, where]) => [found.colors[name], found.backgrounds[where]]));
+  assert.ok(ratios.every((r) => r > 1 && r <= 21), `ratios were measured: ${ratios}`);
+  const failing = pairs.filter(([name], i) => ratios[i] < (name === 'tick' ? 3 : 4.5)).map(([name, where]) => `${name} on ${where}`);
+  assert.deepEqual(failing, [], 'WCAG AA: 4.5 for text, 3 for the tick icon');
+
+  const link = p.locator(`${thread('booking')} .ct-msg--note a`);
+  await link.hover();
+  assert.equal(await link.evaluate((el) => getComputedStyle(el).color), 'rgb(110, 118, 129)');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('auto: dark by default, light when the system is light, and <html data-theme> wins over the system', async (t) => {
+  if (!browser) return t.skip('no browser');
+  const { p, ctx, errors } = await page(1200, 900, { colorScheme: 'light' });
+  const LIGHT = 'rgb(227, 249, 232) rgb(31, 35, 40)';
+  const DARK = 'rgb(31, 59, 52) rgb(230, 237, 243)';
+  const read = async () => {
+    const seen = await p.evaluate(() => {
+      const ct = document.querySelector('[data-thread="reminders"] .ct');
+      return `${getComputedStyle(ct.querySelector('.ct-msg--mine')).backgroundColor} ${getComputedStyle(ct).color}`;
+    });
+    return seen === LIGHT ? 'light' : seen === DARK ? 'dark' : seen;
+  };
+  const setTheme = (value) => p.evaluate((v) => { if (v === null) delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = v; }, value);
+  const seen = {};
+  for (const scheme of ['light', 'dark', 'no-preference']) {
+    await p.emulateMedia({ colorScheme: scheme });
+    for (const theme of [null, 'light', 'dark', 'sepia']) {
+      await setTheme(theme);
+      seen[`${scheme}/${theme}`] = await read();
+    }
+  }
+  assert.deepEqual(seen, {
+    'light/null': 'light', 'light/light': 'light', 'light/dark': 'dark', 'light/sepia': 'light',
+    'dark/null': 'dark', 'dark/light': 'light', 'dark/dark': 'dark', 'dark/sepia': 'dark',
+    'no-preference/null': 'dark', 'no-preference/light': 'light', 'no-preference/dark': 'dark', 'no-preference/sepia': 'dark',
+  });
+
+  // the demo's buttons set and clear it
+  await setTheme(null);
+  await p.emulateMedia({ colorScheme: 'dark' });
+  await p.click('[data-scheme="light"]');
+  assert.equal(await read(), 'light');
+  assert.equal(await p.getAttribute('[data-scheme="light"]', 'aria-pressed'), 'true');
+  await p.click('[data-scheme="system"]');
+  assert.equal(await p.evaluate(() => document.documentElement.hasAttribute('data-theme')), false);
+  assert.equal(await read(), 'dark');
+
+  // theme light ignores all of it, and an app's own --ct-* on its container still beat auto
+  assert.equal(await p.locator(`${thread('booking')} .ct-msg--mine`).evaluate((el) => getComputedStyle(el).backgroundColor), 'rgb(227, 249, 232)');
+  await p.click('[data-scheme="light"]');
+  await p.evaluate(() => [...document.styleSheets].find((sheet) => sheet.href?.endsWith('demo.css')).insertRule('[data-thread="reminders"] .ct { --ct-mine: rgb(1, 2, 3); }'));
+  assert.equal(await read(), 'rgb(1, 2, 3) rgb(31, 35, 40)');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('a note: no bubble, the whole width, the theme\'s text, markdown, a quiet time below; replies arrive as notes', async (t) => {
+  if (!browser) return t.skip('no browser');
+  const { p, ctx, errors } = await page();
+  const note = p.locator(`${thread('booking')} .ct-msg--note`).last();
+  const box = await note.evaluate((el) => {
+    const s = getComputedStyle(el);
+    const list = el.closest('.ct-list').getBoundingClientRect();
+    const r = el.getBoundingClientRect();
+    const meta = el.querySelector(':scope > .ct-meta');
+    return {
+      background: s.backgroundColor,
+      border: [s.borderTopWidth, s.borderRightWidth, s.borderBottomWidth, s.borderLeftWidth].join(' '),
+      color: s.color,
+      fullWidth: Math.abs(r.width - list.width) < 1 && Math.abs(r.left - list.left) < 1,
+      items: el.querySelectorAll('li').length,
+      strong: el.querySelector('strong')?.textContent,
+      authorOrTicks: el.querySelectorAll('.ct-author, .ct-tick').length,
+      meta: meta && { color: getComputedStyle(meta).color, size: getComputedStyle(meta).fontSize, below: meta.getBoundingClientRect().top >= el.querySelector('.ct-body').getBoundingClientRect().bottom - 1 },
+    };
+  });
+  assert.deepEqual(box, {
+    background: 'rgba(0, 0, 0, 0)',
+    border: '0px 0px 0px 0px',
+    color: 'rgb(31, 35, 40)',
+    fullWidth: true,
+    items: 3,
+    strong: 'Sam',
+    authorOrTicks: 0,
+    meta: { color: 'rgb(89, 99, 110)', size: '11px', below: true },
+  });
+  const alert = await p.locator(`${thread('reminders')} .ct-msg--alert`).evaluate((el) => [getComputedStyle(el).borderLeftWidth, getComputedStyle(el).borderTopWidth]);
+  assert.deepEqual(alert, ['3px', '0px'], 'an alert note gets a bar on the left, not a box');
+
+  await p.click(`${thread('booking')} .ct-chip >> text=14:00`);
+  await p.locator(`${thread('booking')} .ct-msg--mine`, { hasText: '14:00' }).waitFor();
+  await p.locator(`${thread('booking')} .ct-msg--note`, { hasText: 'booked for' }).waitFor();
+  assert.equal(await p.locator(`${thread('booking')} .ct-typing`).count(), 0);
+
+  const clamp = await p.evaluate(async () => {
+    const { createChat } = await import('/src/chat-thread.js');
+    const el = document.createElement('div');
+    document.querySelector('[data-thread="booking"]').after(el);
+    const at = new Date().toISOString();
+    const chat = createChat(el, { theme: 'light', clamp: 5, mode: 'readonly', messages: [
+      { id: 1, kind: 'note', text: 'fits after all', at },
+      { id: 2, kind: 'note', text: Array.from({ length: 14 }, (_, i) => `line ${i + 1}`).join('\n'), at },
+    ] });
+    const [short, long] = el.querySelectorAll('.ct-msg--note');
+    const body = long.querySelector('.ct-body--clamped');
+    const out = {
+      shortKeepsMetaBelow: short.querySelector(':scope > .ct-meta') !== null && short.querySelector('.ct-more') === null,
+      mask: getComputedStyle(body).maskImage.startsWith('linear-gradient'),
+      fadeBox: getComputedStyle(body, '::after').display,
+      more: long.querySelector('.ct-more')?.textContent,
+    };
+    chat.destroy();
+    el.remove();
+    return out;
+  });
+  assert.deepEqual(clamp, { shortKeepsMetaBelow: true, mask: true, fadeBox: 'none', more: 'Read more' });
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 for (const width of [360, 1200]) {
   test(`no horizontal scroll at ${width} px`, async (t) => {
     if (!browser) return t.skip('no browser');
@@ -184,6 +364,8 @@ for (const width of [360, 1200]) {
     assert.ok(scroll <= client, `page is ${scroll}px wide in a ${client}px window`);
     const wide = await p.evaluate(() => [...document.querySelectorAll('.ct-msg')].filter((el) => el.getBoundingClientRect().right > document.documentElement.clientWidth + 0.5).length);
     assert.equal(wide, 0, 'no bubble crosses the right edge');
+    const notes = await p.evaluate(() => [...document.querySelectorAll('.ct-msg--note')].map((el) => Math.round(el.closest('.ct-list').getBoundingClientRect().width - el.getBoundingClientRect().width)));
+    assert.deepEqual([...new Set(notes)], [0], 'every note takes the whole width');
     assert.deepEqual(errors, []);
     await ctx.close();
   });

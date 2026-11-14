@@ -64,6 +64,28 @@ test('load pages backwards with limit and before; threads lists the latest first
   assert.deepEqual(threads.map((t) => [t.thread, t.count, t.last.text]), [['b', 1, 'only one'], ['a', 5, 'm4']]);
 });
 
+test('kind: notes are stored and drawn without a bubble; a 0.1.0 table gets the column', () => {
+  const store = createSqliteStore(new DatabaseSync(':memory:'), { now: clock() });
+  const note = store.add('t', { author: 'Assistant', kind: 'note', text: 'Friday has **three** times open.' });
+  const bubble = store.add('t', { from: 'me', text: 'Friday' });
+  assert.deepEqual([note.kind, bubble.kind], ['note', 'bubble']);
+  assert.throws(() => store.add('t', { text: 'x', kind: 'aside' }), /kind must be one of bubble, note/);
+  assert.equal(store.update('t', bubble.id, { kind: 'note' }).kind, 'note');
+  const html = renderThread(store.load('t').messages, { timeZone: 'UTC', now: () => new Date('2026-11-13T20:00:00Z') });
+  assert.match(html, /<div class="ct-msg ct-msg--note" data-id="1"[^>]*><div class="ct-body"><p>Friday has <strong>three<\/strong> times open\.<\/p><\/div>/);
+
+  const db = new DatabaseSync(':memory:');
+  db.exec(`CREATE TABLE chat_messages (id INTEGER PRIMARY KEY, thread TEXT NOT NULL, side TEXT NOT NULL DEFAULT 'other',
+    author TEXT NOT NULL DEFAULT '', text TEXT NOT NULL DEFAULT '', title TEXT NOT NULL DEFAULT '', tag TEXT NOT NULL DEFAULT '',
+    state TEXT, alert INTEGER NOT NULL DEFAULT 0, format TEXT, meta TEXT, at TEXT NOT NULL,
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL, removed_at TEXT)`);
+  db.exec(`INSERT INTO chat_messages (thread, text, at, created_at, updated_at) VALUES ('t', 'from 0.1.0', '2026-11-13T10:00:00.000Z', 'x', 'x')`);
+  const old = createSqliteStore(db);
+  assert.deepEqual(old.load('t').messages.map((m) => [m.text, m.kind]), [['from 0.1.0', 'bubble']]);
+  assert.equal(old.add('t', { kind: 'note', text: 'new' }).kind, 'note');
+  assert.equal(createSqliteStore(db).load('t').messages.length, 2, 'opening it again changes nothing');
+});
+
 test('what the store returns renders straight into a thread', () => {
   const store = createSqliteStore(new DatabaseSync(':memory:'), { now: clock() });
   store.add('t', { from: 'me', text: 'hi' });
@@ -94,8 +116,8 @@ async function withServer(fn) {
 test('restStore against the HTTP handler: the browser always writes as me', async () => {
   await withServer(async ({ store, base }) => {
     const rest = restStore(`${base}/api/chat/support`);
-    const sent = await rest.send({ from: 'other', text: 'pretending', author: 'Admin', state: 'queued', meta: { toggles: { close: true } } });
-    assert.deepEqual([sent.from, sent.author, sent.state, sent.meta], ['me', '', 'queued', { toggles: { close: true } }]);
+    const sent = await rest.send({ from: 'other', kind: 'note', text: 'pretending', author: 'Admin', state: 'queued', meta: { toggles: { close: true } } });
+    assert.deepEqual([sent.from, sent.kind, sent.author, sent.state, sent.meta], ['me', 'bubble', '', 'queued', { toggles: { close: true } }]);
     const reply = store.add('support', { from: 'other', author: 'Assistant', text: 'Hello' });
     assert.deepEqual((await rest.load()).messages.map((m) => m.from), ['me', 'other']);
     await assert.rejects(rest.remove(reply.id), /message not found/, 'the browser cannot remove the other side');

@@ -14,12 +14,13 @@
  * A thread is any id you choose (`support`, `user-42`, `task:17`). Nothing is ever deleted:
  * removed messages keep their row with a timestamp.
  */
-import { FORMATS, LIMITS, STATES, normalizeAt } from '../src/core.js';
+import { FORMATS, KINDS, LIMITS, STATES, normalizeAt } from '../src/core.js';
 
 const COLUMNS = `
   id INTEGER PRIMARY KEY,
   thread TEXT NOT NULL,
   side TEXT NOT NULL DEFAULT 'other',
+  kind TEXT NOT NULL DEFAULT 'bubble',
   author TEXT NOT NULL DEFAULT '',
   text TEXT NOT NULL DEFAULT '',
   title TEXT NOT NULL DEFAULT '',
@@ -45,6 +46,7 @@ const fromRow = (r) => ({
   id: r.id,
   thread: r.thread,
   from: r.side,
+  kind: r.kind,
   author: r.author,
   text: r.text,
   title: r.title,
@@ -74,6 +76,10 @@ function toColumns(patch, { creating = false } = {}) {
   if (patch.from !== undefined) {
     if (patch.from !== 'me' && patch.from !== 'other') throw new ValidationError('from must be "me" or "other"');
     cols.side = patch.from;
+  }
+  if (patch.kind !== undefined) {
+    if (!KINDS.includes(patch.kind)) throw new ValidationError(`kind must be one of ${KINDS.join(', ')}`);
+    cols.kind = patch.kind;
   }
   if (patch.text !== undefined) {
     if (typeof patch.text !== 'string') throw new ValidationError('text must be text');
@@ -112,6 +118,10 @@ function toColumns(patch, { creating = false } = {}) {
 export function createSqliteStore(db, { table = 'chat_messages', now = () => new Date().toISOString(), onChange = () => {} } = {}) {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(table)) throw new Error('invalid table name');
   db.exec(`CREATE TABLE IF NOT EXISTS ${table} (${COLUMNS})`);
+  // a table made by 0.1.0 has no kind column: every message in it was a bubble
+  if (!db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === 'kind')) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN kind TEXT NOT NULL DEFAULT 'bubble'`);
+  }
   db.exec(`CREATE INDEX IF NOT EXISTS ${table}_thread ON ${table}(thread, removed_at, id)`);
 
   const one = (sql, ...args) => db.prepare(sql).get(...args);
@@ -119,7 +129,7 @@ export function createSqliteStore(db, { table = 'chat_messages', now = () => new
   const run = (sql, ...args) => db.prepare(sql).run(...args);
   const byId = (thread, id) => one(`SELECT * FROM ${table} WHERE thread = ? AND id = ? AND removed_at IS NULL`, thread, Number(id));
 
-  /** Changes a message: `state`, `alert`, `text` (a streamed answer), `tag`, `title`, `format`, `meta`; or `{ removed: true }`. */
+  /** Changes a message: `state`, `alert`, `text` (a streamed answer), `kind`, `tag`, `title`, `format`, `meta`; or `{ removed: true }`. */
   function update(thread, id, patch = {}, { from } = {}) {
     checkThread(thread);
     const before = byId(thread, id);
@@ -160,7 +170,7 @@ export function createSqliteStore(db, { table = 'chat_messages', now = () => new
       return row ? fromRow(row) : null;
     },
 
-    /** A new message. `from` is `me` or `other` (default `other`, the side your app writes for). */
+    /** A new message. `from` is `me` or `other` (default `other`, the side your app writes for); `kind` is `bubble` (default) or `note`. */
     add(thread, draft = {}) {
       checkThread(thread);
       const stamp = now();

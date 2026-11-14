@@ -1,5 +1,6 @@
 /* chat-thread: every color and size is a custom property on .ct, so an app repaints the
-   thread by setting a few of them on its own container. Default: the dark green palette. */
+   thread by setting a few of them on its own container. Default: the dark green palette;
+   .ct--light is its light twin, .ct--auto picks one of the two (see the end of this file). */
 .ct {
   --ct-mine: #1f3b34;
   --ct-mine-border: #2b5248;
@@ -34,6 +35,7 @@
   --ct-input-size: 15px;
   --ct-max-width: min(86%, 680px);
   --ct-clamp: 7.4em;
+  --ct-note-meta: inline-flex;
 
   display: flex;
   flex-direction: column;
@@ -43,6 +45,7 @@
   text-align: left;
   white-space: normal;
   overflow-wrap: anywhere;
+  color-scheme: dark;
 }
 .ct *, .ct *::before, .ct *::after { box-sizing: border-box; }
 
@@ -83,6 +86,17 @@
 }
 .ct-msg--queued { border-style: dashed; opacity: .85; }
 .ct-msg--alert { border-color: var(--ct-alert); }
+
+/* a note: the other side narrating across the whole width, with no bubble */
+.ct-msg--note {
+  align-self: stretch;
+  max-width: none;
+  margin: 2px 0;
+  padding: 0 2px;
+  border-radius: 0;
+}
+.ct-msg--note.ct-msg--alert { padding-left: 10px; border-left: 3px solid var(--ct-alert); }
+.ct-msg--note > .ct-meta { display: var(--ct-note-meta); float: none; margin: 3px 0 0; }
 
 .ct-author { display: block; margin-bottom: 1px; color: var(--ct-author); font-size: 12.5px; font-weight: 650; }
 .ct-author--1 { color: var(--ct-author-1); }
@@ -153,6 +167,12 @@
 
 /* long messages */
 .ct-body--clamped { position: relative; max-height: var(--ct-clamp); overflow: hidden; }
+/* a note has no bubble to fade into, so its text fades out over whatever is behind it */
+.ct-msg--note > .ct-body--clamped {
+  -webkit-mask-image: linear-gradient(180deg, #000 calc(100% - 40px), transparent);
+  mask-image: linear-gradient(180deg, #000 calc(100% - 40px), transparent);
+}
+.ct-msg--note > .ct-body--clamped::after { display: none; }
 .ct-body--clamped::after {
   content: "";
   position: absolute;
@@ -264,6 +284,7 @@
   --ct-code: rgba(11, 20, 26, .06);
   --ct-pre: rgba(11, 20, 26, .05);
   --ct-font-size: 14.2px;
+  color-scheme: light;
 }
 .ct--whatsapp .ct-msg { border-radius: 8px; box-shadow: 0 1px .5px rgba(11, 20, 26, .13); }
 .ct--whatsapp .ct-msg--mine { margin-right: 8px; border-top-right-radius: 0; }
@@ -279,3 +300,74 @@
 .ct--whatsapp .ct-msg--mine::after { right: -8px; border-top-color: var(--ct-mine); border-left-color: var(--ct-mine); }
 .ct--whatsapp .ct-msg--theirs::after { left: -8px; border-top-color: var(--ct-theirs); border-right-color: var(--ct-theirs); }
 .ct--whatsapp .ct-msg.ct-typing::after { display: none; }
+.ct--whatsapp .ct-msg--note { border-radius: 0; box-shadow: none; }
+
+/* light: the dark palette's twin for light apps. Text, muted text and links pass WCAG AA on
+   both bubbles; the bubbles sit on a light background (#f5f6f8 or close). */
+.ct--light,
+:where(:root[data-theme="light"]) .ct--auto {
+  --ct-mine: #e3f9e8;
+  --ct-mine-border: #b4e2c0;
+  --ct-theirs: #ffffff;
+  --ct-theirs-border: #d6dbe1;
+  --ct-text: #1f2328;
+  --ct-muted: #59636e;
+  --ct-tick: #1a7f37;
+  --ct-link: #0969da;
+  --ct-hover: #6e7681;
+  --ct-author: #0550ae;
+  --ct-author-1: #0550ae;
+  --ct-author-2: #7d4e00;
+  --ct-author-3: #6639ba;
+  --ct-author-4: #bc4c00;
+  --ct-author-5: #1a7f37;
+  --ct-author-6: #bf3989;
+  --ct-title: #1a7f37;
+  --ct-field: #ffffff;
+  --ct-field-border: #d6dbe1;
+  --ct-focus: #1a7f37;
+  --ct-send: #1f883d;
+  --ct-send-icon: #ffffff;
+  --ct-alert: #cf222e;
+  --ct-day: #e8ecf0;
+  --ct-chip: #ffffff;
+  --ct-code: rgba(31, 35, 40, .08);
+  --ct-pre: rgba(31, 35, 40, .05);
+  color-scheme: light;
+}
+
+/* auto: dark unless the page says light. <html data-theme="light"> or "dark" decides; with
+   no data-theme (or any other value) the system's prefers-color-scheme does. The :where()
+   keeps these rules as weak as .ct, so an app's own --ct-* on its container still win. */
+@media (prefers-color-scheme: light) {
+  :where(:root:not([data-theme="dark"])) .ct--auto {
+    --ct-mine: #e3f9e8;
+    --ct-mine-border: #b4e2c0;
+    --ct-theirs: #ffffff;
+    --ct-theirs-border: #d6dbe1;
+    --ct-text: #1f2328;
+    --ct-muted: #59636e;
+    --ct-tick: #1a7f37;
+    --ct-link: #0969da;
+    --ct-hover: #6e7681;
+    --ct-author: #0550ae;
+    --ct-author-1: #0550ae;
+    --ct-author-2: #7d4e00;
+    --ct-author-3: #6639ba;
+    --ct-author-4: #bc4c00;
+    --ct-author-5: #1a7f37;
+    --ct-author-6: #bf3989;
+    --ct-title: #1a7f37;
+    --ct-field: #ffffff;
+    --ct-field-border: #d6dbe1;
+    --ct-focus: #1a7f37;
+    --ct-send: #1f883d;
+    --ct-send-icon: #ffffff;
+    --ct-alert: #cf222e;
+    --ct-day: #e8ecf0;
+    --ct-chip: #ffffff;
+    --ct-code: rgba(31, 35, 40, .08);
+    --ct-pre: rgba(31, 35, 40, .05);
+    color-scheme: light;
+  }
+}

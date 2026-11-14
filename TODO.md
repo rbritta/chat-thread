@@ -8,6 +8,7 @@ Ideas that are not built yet, roughly in order. Open an issue before starting a 
 - [ ] Older messages on scroll up (`load({ before })` is already in the server store).
 - [ ] Attachments: an image or a file card inside the bubble.
 - [ ] Reply to a message (the quoted bubble on top) and reactions.
-- [ ] A light theme that is not WhatsApp, following `prefers-color-scheme`.
+- [ ] Typing dots without a bubble, for threads where the other side narrates in notes.
+- [ ] A `system` kind: a short centered line ("Dana joined", "Moved to Friday").
 - [ ] Markdown tables and quotes.
 - [ ] Publish to npm once the API has settled on real use.

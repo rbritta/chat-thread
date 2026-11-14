@@ -86,8 +86,9 @@ test('times and day labels follow the time zone and the locale', () => {
 });
 
 test('normalizeMessage falls back on bad input instead of throwing', () => {
-  const m = normalizeMessage({ id: '7', from: 'admin', text: 42, at: 'nope', state: 'lost', alert: 'yes', format: 'html', meta: [1] });
-  assert.deepEqual(m, { id: '7', from: 'other', author: '', text: '42', at: null, state: null, alert: false, tag: '', title: '', format: null, meta: null });
+  const m = normalizeMessage({ id: '7', from: 'admin', kind: 'aside', text: 42, at: 'nope', state: 'lost', alert: 'yes', format: 'html', meta: [1] });
+  assert.deepEqual(m, { id: '7', from: 'other', kind: 'bubble', author: '', text: '42', at: null, state: null, alert: false, tag: '', title: '', format: null, meta: null });
+  assert.equal(normalizeMessage({ kind: 'note' }).kind, 'note');
   assert.equal(normalizeMessage({ id: 3, from: 'me' }).id, 3);
   assert.equal(normalizeMessage(null).from, 'other');
 });
@@ -149,6 +150,22 @@ test('formats: theirs markdown and mine plain by default; whatsapp for everyone 
   assert.match(renderMessage({ from: 'other', text: '*a*', format: 'plain' }), /\*a\*/, 'a message can choose its own format');
 });
 
+test('a note: no bubble, no author, no ticks, markdown, the time on its own line', () => {
+  const opts = { ...UTC, now: NOW, author: 'Assistant', colorAuthors: true };
+  const note = renderMessage({ id: 4, from: 'other', kind: 'note', text: 'Friday has **three** times:\n- 10:30\n- 14:00', at: '2026-11-13T10:03:00Z' }, opts);
+  assert.equal(note, '<div class="ct-msg ct-msg--note" data-id="4" data-day="2026-11-13"><div class="ct-body"><p>Friday has <strong>three</strong> times:</p><ul><li>10:30</li><li>14:00</li></ul></div><span class="ct-meta"><time datetime="2026-11-13T10:03:00.000Z">10:03</time></span></div>');
+  assert.equal(renderMessage({ kind: 'note', text: 'no time' }, opts), '<div class="ct-msg ct-msg--note"><div class="ct-body"><p>no time</p></div></div>', 'no at, no time');
+  assert.match(renderMessage({ kind: 'note', text: 'hi', author: 'Dana', title: 'Today' }, opts), /^<div class="ct-msg ct-msg--note"><p class="ct-title">Today<\/p><div class="ct-body">/, 'a title yes, an author line no');
+  const mine = renderMessage({ id: 5, from: 'me', kind: 'note', state: 'queued', text: '**booked**' }, opts);
+  assert.match(mine, /class="ct-msg ct-msg--note ct-msg--queued"/);
+  assert.match(mine, /<strong>booked<\/strong>/, 'a note is markdown on either side');
+  assert.doesNotMatch(mine, /ct-tick|ct-remove/);
+  assert.match(renderMessage({ kind: 'note', text: 'failed', alert: true }), /class="ct-msg ct-msg--note ct-msg--alert"/);
+  const long = renderMessage({ kind: 'note', text: 'word '.repeat(150), at: '2026-11-13T10:00:00Z' }, UTC);
+  assert.match(long, /<div class="ct-body ct-body--clamped">.*<\/div><button type="button" class="ct-more" aria-expanded="false">Read more<\/button><span class="ct-meta">/);
+  assert.match(renderMessage({ kind: 'note', text: '*a*' }, { format: 'whatsapp' }), /<strong>a<\/strong>/, 'the thread format still applies');
+});
+
 test('group authors get a stable color slot', () => {
   assert.equal(authorTone('Dana'), authorTone('Dana'));
   assert.ok(authorTone('Kim') >= 1 && authorTone('Kim') <= 6);
@@ -186,6 +203,8 @@ test('the thread: modes, themes, composer with chips and toggles', () => {
   assert.match(preview, /^<div class="ct ct--whatsapp ct--preview" data-mode="preview">/);
   assert.doesNotMatch(preview, /ct-day|ct-composer/);
   assert.equal(renderComposer({}).includes('ct-chips'), false);
+  assert.match(renderThread([], { theme: 'light' }), /^<div class="ct ct--light" data-mode="chat">/);
+  assert.match(renderThread([], { theme: 'auto', mode: 'readonly' }), /^<div class="ct ct--auto ct--readonly" data-mode="readonly">/);
 });
 
 test('CSP-safe markup: no style attributes, no inline handlers, everything escaped', () => {
@@ -194,6 +213,7 @@ test('CSP-safe markup: no style attributes, no inline handlers, everything escap
     { id: '"><b>', from: 'other', author: evil, title: evil, tag: evil, text: `${evil}\n\`\`\`\n${evil}\n\`\`\`` },
     { from: 'me', text: evil, state: 'queued', id: 1 },
     { from: 'other', text: evil, format: 'whatsapp' },
+    { from: 'other', kind: 'note', text: evil, title: evil, tag: evil, at: '2026-11-13T10:00:00Z' },
   ], { author: evil, chips: [evil], toggles: [{ name: 'x', label: evil }], strings: { placeholder: evil } }, { typing: evil, waiting: evil });
   assert.doesNotMatch(html, /\sstyle="/);
   assert.doesNotMatch(html, /\son\w+="/);
@@ -201,7 +221,10 @@ test('CSP-safe markup: no style attributes, no inline handlers, everything escap
 });
 
 test('the dist builds load and render exactly like src', async () => {
-  const messages = [{ id: 1, from: 'other', author: 'Bot', text: '**hi** `x`', at: '2026-11-13T10:00:00Z' }];
+  const messages = [
+    { id: 1, from: 'other', author: 'Bot', text: '**hi** `x`', at: '2026-11-13T10:00:00Z' },
+    { id: 2, from: 'other', kind: 'note', text: 'a note', at: '2026-11-13T10:01:00Z' },
+  ];
   const expected = renderThread(messages, { ...UTC, now: NOW });
   const esm = await import('../dist/chat-thread.mjs');
   assert.equal(esm.renderThread(messages, { ...UTC, now: NOW }), expected);

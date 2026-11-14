@@ -11,6 +11,8 @@ export const LIMITS = Object.freeze({ text: 20000, author: 80, title: 200, tag: 
 export const STATES = Object.freeze(['pending', 'queued', 'sent', 'delivered', 'read']);
 export const FORMATS = Object.freeze(['markdown', 'whatsapp', 'plain']);
 export const MODES = Object.freeze(['chat', 'readonly', 'preview']);
+/** `bubble` is a message in a bubble; `note` is the other side narrating, full width, with no bubble. */
+export const KINDS = Object.freeze(['bubble', 'note']);
 
 /** Every visible word. Pass `strings` to translate: `{ placeholder: 'Mensagem', send: 'Enviar' }`. */
 export const DEFAULT_STRINGS = Object.freeze({
@@ -312,7 +314,8 @@ export function dayLabel(key, { now = new Date(), locale, timeZone, strings = DE
 
 /**
  * A message as the thread and the stores keep it. `from` is `me` (right side) or `other`
- * (left side, with its `author`). Bad fields fall back instead of throwing.
+ * (left side, with its `author`); `kind` is `bubble` or `note` (no bubble, full width).
+ * Bad fields fall back instead of throwing.
  */
 export function normalizeMessage(input) {
   const m = input && typeof input === 'object' ? input : {};
@@ -322,6 +325,7 @@ export function normalizeMessage(input) {
   return {
     id,
     from: m.from === 'me' ? 'me' : 'other',
+    kind: KINDS.includes(m.kind) ? m.kind : 'bubble',
     author: text(m.author, LIMITS.author).trim(),
     text: text(m.text, LIMITS.text),
     at: normalizeAt(m.at),
@@ -382,18 +386,22 @@ function ticks(state, strings) {
 const intoLast = (html, extra) => (html.endsWith('</p>') ? `${html.slice(0, -4)}${extra}</p>` : null);
 const intoFirst = (html, extra) => (/^<p[^>]*>/.test(html) ? html.replace(/^<p[^>]*>/, (open) => open + extra) : `${extra}${html}`);
 
-/** One bubble. `options` are the thread's (see `DEFAULTS`). */
+/**
+ * One message. `options` are the thread's (see `DEFAULTS`). A `note` has no bubble, no
+ * author line and no ticks: it is markdown across the whole width, with the time below it.
+ */
 export function renderMessage(input, options) {
   const o = resolveOptions(options);
   const s = o.strings;
   const m = normalizeMessage(input);
   const mine = m.from === 'me';
-  const format = m.format || (o.format === 'auto' ? (mine ? 'plain' : 'markdown') : o.format);
-  const classes = ['ct-msg', mine ? 'ct-msg--mine' : 'ct-msg--theirs'];
+  const note = m.kind === 'note';
+  const format = m.format || (o.format === 'auto' ? (mine && !note ? 'plain' : 'markdown') : o.format);
+  const classes = ['ct-msg', note ? 'ct-msg--note' : mine ? 'ct-msg--mine' : 'ct-msg--theirs'];
   if (m.state === 'queued') classes.push('ct-msg--queued');
   if (m.alert) classes.push('ct-msg--alert');
 
-  const name = mine ? '' : m.author || o.author;
+  const name = mine || note ? '' : m.author || o.author;
   const author = name ? `<span class="ct-author${o.colorAuthors ? ` ct-author--${authorTone(name)}` : ''}">${escapeHtml(name)}</span>` : '';
   const title = m.title ? `<p class="ct-title">${escapeHtml(m.title)}</p>` : '';
 
@@ -402,15 +410,15 @@ export function renderMessage(input, options) {
   if (tag) body = intoFirst(body, `<span class="ct-tag">${escapeHtml(tag)}</span>`);
 
   const time = m.at ? `<time datetime="${m.at}">${escapeHtml(formatTime(m.at, o))}</time>` : '';
-  const removable = mine && m.state === 'queued' && o.mode === 'chat' && m.id !== null;
-  const metaInner = `${time}${mine && o.ticks ? ticks(m.state, s) : ''}${removable ? `<button type="button" class="ct-remove" aria-label="${escapeHtml(s.remove)}" title="${escapeHtml(s.remove)}">×</button>` : ''}`;
+  const removable = mine && !note && m.state === 'queued' && o.mode === 'chat' && m.id !== null;
+  const metaInner = `${time}${mine && !note && o.ticks ? ticks(m.state, s) : ''}${removable ? `<button type="button" class="ct-remove" aria-label="${escapeHtml(s.remove)}" title="${escapeHtml(s.remove)}">×</button>` : ''}`;
   const meta = metaInner ? `<span class="ct-meta">${metaInner}</span>` : '';
 
   let inner;
   if (isLong(m.text, o.clamp)) {
     inner = `<div class="ct-body ct-body--clamped">${body}</div><button type="button" class="ct-more" aria-expanded="false">${escapeHtml(s.more)}</button>${meta}`;
   } else {
-    const joined = intoLast(body, meta);
+    const joined = note ? null : intoLast(body, meta);
     inner = joined === null ? `<div class="ct-body">${body}</div>${meta}` : `<div class="ct-body">${joined}</div>`;
   }
   const id = m.id !== null ? ` data-id="${escapeHtml(String(m.id))}"` : '';

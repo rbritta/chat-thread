@@ -13,9 +13,10 @@ function at([daysAgo, time]) {
 const messagesOf = (name) => data[name].messages.map(({ when, ...m }, i) => ({ id: i + 1, ...m, at: at(when) }));
 const slot = (name) => document.querySelector(`[data-thread="${name}"]`);
 
-/** A thread you can type in. The other side answers with a canned reply after a moment. */
+/** A thread you can type in. The other side answers with a canned reply (a text or a message) after a moment. */
 function live(name) {
-  const { options, reply } = data[name];
+  const { options } = data[name];
+  const reply = typeof data[name].reply === 'string' ? { text: data[name].reply } : data[name].reply;
   const store = memoryStore(messagesOf(name));
   const chat = createChat(slot(name), {
     ...options,
@@ -24,13 +25,13 @@ function live(name) {
     onChange(event) {
       if (event.type !== 'send' || !reply) return;
       setTimeout(() => chat.setTyping(true), 500);
-      setTimeout(() => chat.append({ from: 'other', text: reply, at: new Date().toISOString() }), 1900);
+      setTimeout(() => chat.append({ ...reply, from: 'other', at: new Date().toISOString() }), 1900);
     },
   });
   return chat;
 }
 
-const chats = Object.fromEntries(['task', 'session', 'directions', 'reading'].map((name) => [name, live(name)]));
+const chats = Object.fromEntries(['task', 'session', 'directions', 'reading', 'booking', 'reminders'].map((name) => [name, live(name)]));
 
 // Read-only, as a server would send it: a string from renderThread(), then hydrated for "Read more" and Copy.
 const log = slot('log');
@@ -39,5 +40,15 @@ chats.log = createChat(log, { ...data.log.options, hydrate: true });
 
 // Previews are plain strings: no script needed to show them.
 for (const name of ['reminder', 'scheduled']) slot(name).innerHTML = renderThread(messagesOf(name), data[name].options);
+
+// Theme auto follows <html data-theme>: Light and Dark set it, System removes it.
+const schemes = document.querySelectorAll('[data-scheme]');
+for (const button of schemes) {
+  button.addEventListener('click', () => {
+    if (button.dataset.scheme === 'system') delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = button.dataset.scheme;
+    for (const other of schemes) other.setAttribute('aria-pressed', String(other === button));
+  });
+}
 
 window.demoChats = chats;

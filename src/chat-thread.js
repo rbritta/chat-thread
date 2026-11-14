@@ -8,7 +8,8 @@
  *   chat.destroy();
  *
  * My messages sit on the right with time and ticks; the other side sits on the left with
- * its author. Their text is markdown (code gets a Copy button), mine stays as I wrote it.
+ * its author, or narrates across the whole width with no bubble (`kind: 'note'`). Their
+ * text is markdown (code gets a Copy button), mine stays as I wrote it.
  * The box grows from one to six lines: Enter sends, Shift+Enter breaks the line.
  *
  * The thread never talks to a server by itself: sending goes through `store.send` or
@@ -96,7 +97,8 @@ export function createChat(el, options = {}) {
       const msg = body.parentElement;
       msg.querySelector(':scope > .ct-more')?.remove();
       const meta = msg.querySelector(':scope > .ct-meta');
-      if (meta && body.lastElementChild?.tagName === 'P') body.lastElementChild.append(meta);
+      // a bubble keeps the time at the end of its last line; a note keeps it below the text
+      if (meta && !msg.classList.contains('ct-msg--note') && body.lastElementChild?.tagName === 'P') body.lastElementChild.append(meta);
     }
   }
 

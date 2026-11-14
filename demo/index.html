@@ -12,7 +12,7 @@
 <body>
   <header class="top">
     <h1>chat-thread</h1>
-    <p>One conversation component in six apps: only the colors change. Type in any box with a Send button: Enter sends, Shift+Enter breaks the line. Everything here is made-up data, and this page runs under a strict Content Security Policy.</p>
+    <p>One conversation component in seven apps, dark or light: only the colors change. Type in any box with a Send button: Enter sends, Shift+Enter breaks the line. Everything here is made-up data, and this page runs under a strict Content Security Policy.</p>
     <nav aria-label="Sections">
       <a href="#task">Task thread</a>
       <a href="#session">Session console</a>
@@ -20,6 +20,7 @@
       <a href="#reading">Reading companion</a>
       <a href="#log">Read-only log</a>
       <a href="#previews">WhatsApp previews</a>
+      <a href="#themes">Light and auto</a>
       <a href="https://github.com/rbritta/chat-thread">GitHub</a>
     </nav>
   </header>
@@ -107,6 +108,25 @@
         </div>
       </div>
     </section>
+
+    <section id="themes" class="demo demo--wide">
+      <h2>Light and auto <small>light · auto · notes with no bubble · chips · alert</small></h2>
+      <p class="note">A booking assistant in a light app: the assistant narrates in notes across the whole width, only the person's messages are bubbles. The second thread is <code>theme: 'auto'</code>: it follows the system, or <code>&lt;html data-theme&gt;</code> when the page sets it (the buttons do).</p>
+      <div class="themes">
+        <div class="frame frame--light">
+          <div class="frame-head">Bookings · Assistant</div>
+          <div class="frame-body"><div data-thread="booking"></div></div>
+        </div>
+        <div class="frame frame--auto">
+          <div class="frame-head">Reminders · Assistant
+            <span class="scheme" role="group" aria-label="Theme of the page">
+              <button type="button" data-scheme="system" aria-pressed="true">System</button><button type="button" data-scheme="light" aria-pressed="false">Light</button><button type="button" data-scheme="dark" aria-pressed="false">Dark</button>
+            </span>
+          </div>
+          <div class="frame-body"><div data-thread="reminders"></div></div>
+        </div>
+      </div>
+    </section>
   </main>
 
   <footer class="foot">MIT · <a href="https://github.com/rbritta/chat-thread">github.com/rbritta/chat-thread</a> · <a href="https://github.com/rbritta/chat-thread#use-it">Use it</a></footer>
@@ -160,6 +180,26 @@
       "options": { "mode": "preview", "theme": "whatsapp", "format": "whatsapp" },
       "messages": [
         { "from": "me", "when": [0, "09:41"], "text": "Hi, Alex! 😊 Your appointment moved from ~Wednesday~ to *Thursday, Nov 14 at 9:30 AM*, with Dr. Rivera.\n\nCan you confirm? Anything, just reply here or call _(555) 010-0199_." }
+      ]
+    },
+    "booking": {
+      "options": { "theme": "light", "author": "Assistant", "strings": { "placeholder": "Message the assistant" }, "chips": ["10:30", "14:00", "16:30"] },
+      "reply": { "kind": "note", "text": "Done: your haircut is booked for **Friday** with Sam. I'll send a reminder the day before." },
+      "messages": [
+        { "from": "other", "kind": "note", "when": [0, "10:02"], "text": "Hi! I can book, move or cancel an appointment. What do you need today?" },
+        { "from": "me", "when": [0, "10:03"], "text": "move my haircut to Friday" },
+        { "from": "other", "kind": "note", "when": [0, "10:03"], "text": "Friday with **Sam** has three times open:\n\n- 10:30\n- 14:00\n- 16:30\n\nPick one below, or tell me another day. [Opening hours](#themes)" }
+      ]
+    },
+    "reminders": {
+      "options": { "theme": "auto", "author": "Assistant", "strings": { "placeholder": "Reply to the reminder" }, "chips": ["Book it", "Another time"] },
+      "reply": { "kind": "note", "text": "Booked: **Friday at 11:30** with Dr. Rivera. See you then." },
+      "messages": [
+        { "from": "other", "kind": "note", "when": [1, "18:40"], "text": "Your check-up with **Dr. Rivera** is tomorrow at 9:30. Reply *move* to pick another time." },
+        { "from": "me", "when": [1, "18:52"], "state": "read", "text": "move" },
+        { "from": "other", "kind": "note", "when": [1, "18:52"], "text": "Open times this week:\n\n- Thursday, 9:30\n- Friday, 11:00\n- Monday, 8:00" },
+        { "from": "me", "when": [0, "08:10"], "state": "read", "text": "Friday 11:00" },
+        { "from": "other", "kind": "note", "alert": true, "when": [0, "08:10"], "text": "Friday at 11:00 was just taken. The closest one is **Friday at 11:30**: should I book it?" }
       ]
     },
     "scheduled": {

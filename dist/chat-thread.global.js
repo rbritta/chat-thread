@@ -1,4 +1,4 @@
-/*! chat-thread v0.1.0 | MIT | https://github.com/rbritta/chat-thread */
+/*! chat-thread v0.2.0 | MIT | https://github.com/rbritta/chat-thread */
 (function (global) {
 'use strict';
 /**
@@ -14,6 +14,8 @@ const LIMITS = Object.freeze({ text: 20000, author: 80, title: 200, tag: 120, ur
 const STATES = Object.freeze(['pending', 'queued', 'sent', 'delivered', 'read']);
 const FORMATS = Object.freeze(['markdown', 'whatsapp', 'plain']);
 const MODES = Object.freeze(['chat', 'readonly', 'preview']);
+/** `bubble` is a message in a bubble; `note` is the other side narrating, full width, with no bubble. */
+const KINDS = Object.freeze(['bubble', 'note']);
 
 /** Every visible word. Pass `strings` to translate: `{ placeholder: 'Mensagem', send: 'Enviar' }`. */
 const DEFAULT_STRINGS = Object.freeze({
@@ -315,7 +317,8 @@ function dayLabel(key, { now = new Date(), locale, timeZone, strings = DEFAULT_S
 
 /**
  * A message as the thread and the stores keep it. `from` is `me` (right side) or `other`
- * (left side, with its `author`). Bad fields fall back instead of throwing.
+ * (left side, with its `author`); `kind` is `bubble` or `note` (no bubble, full width).
+ * Bad fields fall back instead of throwing.
  */
 function normalizeMessage(input) {
   const m = input && typeof input === 'object' ? input : {};
@@ -325,6 +328,7 @@ function normalizeMessage(input) {
   return {
     id,
     from: m.from === 'me' ? 'me' : 'other',
+    kind: KINDS.includes(m.kind) ? m.kind : 'bubble',
     author: text(m.author, LIMITS.author).trim(),
     text: text(m.text, LIMITS.text),
     at: normalizeAt(m.at),
@@ -385,18 +389,22 @@ function ticks(state, strings) {
 const intoLast = (html, extra) => (html.endsWith('</p>') ? `${html.slice(0, -4)}${extra}</p>` : null);
 const intoFirst = (html, extra) => (/^<p[^>]*>/.test(html) ? html.replace(/^<p[^>]*>/, (open) => open + extra) : `${extra}${html}`);
 
-/** One bubble. `options` are the thread's (see `DEFAULTS`). */
+/**
+ * One message. `options` are the thread's (see `DEFAULTS`). A `note` has no bubble, no
+ * author line and no ticks: it is markdown across the whole width, with the time below it.
+ */
 function renderMessage(input, options) {
   const o = resolveOptions(options);
   const s = o.strings;
   const m = normalizeMessage(input);
   const mine = m.from === 'me';
-  const format = m.format || (o.format === 'auto' ? (mine ? 'plain' : 'markdown') : o.format);
-  const classes = ['ct-msg', mine ? 'ct-msg--mine' : 'ct-msg--theirs'];
+  const note = m.kind === 'note';
+  const format = m.format || (o.format === 'auto' ? (mine && !note ? 'plain' : 'markdown') : o.format);
+  const classes = ['ct-msg', note ? 'ct-msg--note' : mine ? 'ct-msg--mine' : 'ct-msg--theirs'];
   if (m.state === 'queued') classes.push('ct-msg--queued');
   if (m.alert) classes.push('ct-msg--alert');
 
-  const name = mine ? '' : m.author || o.author;
+  const name = mine || note ? '' : m.author || o.author;
   const author = name ? `<span class="ct-author${o.colorAuthors ? ` ct-author--${authorTone(name)}` : ''}">${escapeHtml(name)}</span>` : '';
   const title = m.title ? `<p class="ct-title">${escapeHtml(m.title)}</p>` : '';
 
@@ -405,15 +413,15 @@ function renderMessage(input, options) {
   if (tag) body = intoFirst(body, `<span class="ct-tag">${escapeHtml(tag)}</span>`);
 
   const time = m.at ? `<time datetime="${m.at}">${escapeHtml(formatTime(m.at, o))}</time>` : '';
-  const removable = mine && m.state === 'queued' && o.mode === 'chat' && m.id !== null;
-  const metaInner = `${time}${mine && o.ticks ? ticks(m.state, s) : ''}${removable ? `<button type="button" class="ct-remove" aria-label="${escapeHtml(s.remove)}" title="${escapeHtml(s.remove)}">×</button>` : ''}`;
+  const removable = mine && !note && m.state === 'queued' && o.mode === 'chat' && m.id !== null;
+  const metaInner = `${time}${mine && !note && o.ticks ? ticks(m.state, s) : ''}${removable ? `<button type="button" class="ct-remove" aria-label="${escapeHtml(s.remove)}" title="${escapeHtml(s.remove)}">×</button>` : ''}`;
   const meta = metaInner ? `<span class="ct-meta">${metaInner}</span>` : '';
 
   let inner;
   if (isLong(m.text, o.clamp)) {
     inner = `<div class="ct-body ct-body--clamped">${body}</div><button type="button" class="ct-more" aria-expanded="false">${escapeHtml(s.more)}</button>${meta}`;
   } else {
-    const joined = intoLast(body, meta);
+    const joined = note ? null : intoLast(body, meta);
     inner = joined === null ? `<div class="ct-body">${body}</div>${meta}` : `<div class="ct-body">${joined}</div>`;
   }
   const id = m.id !== null ? ` data-id="${escapeHtml(String(m.id))}"` : '';
@@ -501,7 +509,8 @@ function renderThread(messages = [], options = {}, state = {}) {
  *   chat.destroy();
  *
  * My messages sit on the right with time and ticks; the other side sits on the left with
- * its author. Their text is markdown (code gets a Copy button), mine stays as I wrote it.
+ * its author, or narrates across the whole width with no bubble (`kind: 'note'`). Their
+ * text is markdown (code gets a Copy button), mine stays as I wrote it.
  * The box grows from one to six lines: Enter sends, Shift+Enter breaks the line.
  *
  * The thread never talks to a server by itself: sending goes through `store.send` or
@@ -584,7 +593,8 @@ function createChat(el, options = {}) {
       const msg = body.parentElement;
       msg.querySelector(':scope > .ct-more')?.remove();
       const meta = msg.querySelector(':scope > .ct-meta');
-      if (meta && body.lastElementChild?.tagName === 'P') body.lastElementChild.append(meta);
+      // a bubble keeps the time at the end of its last line; a note keeps it below the text
+      if (meta && !msg.classList.contains('ct-msg--note') && body.lastElementChild?.tagName === 'P') body.lastElementChild.append(meta);
     }
   }
 
@@ -931,5 +941,5 @@ function localStore(name = 'chat-thread', storage = globalThis.localStorage) {
 }
 
 
-global.ChatThread = { createChat, restStore, memoryStore, localStore, LIMITS, STATES, FORMATS, MODES, DEFAULT_STRINGS, DEFAULTS, resolveOptions, safeUrl, escapeHtml, linkify, renderMarkdown, renderWhatsApp, renderPlain, formatText, normalizeAt, dayKey, formatTime, dayLabel, normalizeMessage, normalizeChips, normalizeToggles, isLong, authorTone, fill, renderMessage, renderDay, renderTyping, renderWaiting, renderList, renderComposer, renderThread };
+global.ChatThread = { createChat, restStore, memoryStore, localStore, LIMITS, STATES, FORMATS, MODES, KINDS, DEFAULT_STRINGS, DEFAULTS, resolveOptions, safeUrl, escapeHtml, linkify, renderMarkdown, renderWhatsApp, renderPlain, formatText, normalizeAt, dayKey, formatTime, dayLabel, normalizeMessage, normalizeChips, normalizeToggles, isLong, authorTone, fill, renderMessage, renderDay, renderTyping, renderWaiting, renderList, renderComposer, renderThread };
 })(typeof globalThis !== 'undefined' ? globalThis : window);
