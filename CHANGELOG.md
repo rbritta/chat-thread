@@ -1,10 +1,11 @@
 # Changelog
 
-## Unreleased: threads
+## 0.5.0 (2026-11-14)
 
 New
 
 - `createThreads(el, options)`: several subjects in one place, each a thread under a header. Threads keep the order they were opened in; a resolved one folds into one line, hidden behind "Show N resolved" at the top. Only the active thread has a message box, and with none open a box at the bottom starts a new thread. The Branch button right of Send (or Ctrl+Shift+Enter) opens a thread derived from the current one with the text. Titles come from a person, an AI (marked ✦) or the first message. Two headers, `conversation` (the default) and `questions` (`Qn` with the state), or the app's own. A working thread shows the typing dots and its activity. Light, dark and auto like the thread.
+- A long thread shows only its latest messages (`latest`, 2 by default, as in a Q&A where the last answer is what matters), with "Show N earlier messages" above them and "Show only the latest" to fold back.
 - `THREAD_STRINGS`, `THREAD_MODES`, `THREAD_HEADERS` and `threadTitle` are exported for apps that draw their own header.
 - The demo has a Threads section; `test/threads.browser.test.js` covers it.
 

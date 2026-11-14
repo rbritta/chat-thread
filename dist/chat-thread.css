@@ -558,3 +558,9 @@
     --ct-th-ai-soft: rgba(130, 80, 223, .1);
   }
 }
+
+/* a long thread: only the latest messages, the rest behind "Show N earlier" */
+.ct-th .ct-th-old { display: none; }
+.ct-th-earlier { align-self: center; display: block; margin: 8px auto 0; padding: 4px 12px; border: 1px solid var(--ct-th-border); border-radius: 999px; background: none; color: var(--ct-muted, #98a1ab); font: inherit; font-size: 12.5px; cursor: pointer; }
+.ct-th-earlier:hover { color: var(--ct-text, #e6e9ec); }
+.ct-th-earlier:focus-visible { outline: 2px solid var(--ct-th-busy); outline-offset: 2px; }

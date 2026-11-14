@@ -42,6 +42,9 @@ export const THREAD_STRINGS = Object.freeze({
   showResolved: 'Show {count} resolved',
   showResolvedOne: 'Show 1 resolved',
   hideResolved: 'Hide resolved',
+  earlier: 'Show {count} earlier messages',
+  earlierOne: 'Show 1 earlier message',
+  latestOnly: 'Show only the latest',
   newThread: 'Write to start a new thread',
   branch: 'Start another thread with this text',
   from: 'from {title}',
@@ -119,12 +122,13 @@ const near = (list) => !list || list.scrollHeight - list.scrollTop - list.client
  * Draws the threads in `el` and returns their controller. Options: `threads`, `mode`
  * (`conversation` or `questions`), `header`, `theme`, `strings`, `chat` (options for every
  * thread's createChat: author, locale, timeZone, strings...), `showResolved`, and the callbacks
+ * `latest` (how many of the last messages a thread shows before "Show N earlier"; 2, 0 shows all),
  * `onSend(id, text, info)`, `onNewThread(text, parentId)` (returns the new thread, or a promise
  * of it), `onResolve(id)`, `onReopen(id)`, `onRename(id, title)`, `onError(err)`.
  */
 export function createThreads(el, options = {}) {
   if (!el) throw new Error('createThreads: no element');
-  const o = { mode: 'conversation', theme: options.chat?.theme || 'dark', showResolved: false, ...options };
+  const o = { mode: 'conversation', theme: options.chat?.theme || 'dark', showResolved: false, latest: 2, ...options };
   const s = { ...THREAD_STRINGS, ...o.strings };
   const chatOpts = { autoScroll: false, ...o.chat, theme: o.theme };
   const report = o.onError || ((err) => console.error('[chat-thread]', err));
@@ -193,7 +197,34 @@ export function createThreads(el, options = {}) {
     x.activity.textContent = busy && t.activity ? `${t.activity}…` : '';
     x.activity.hidden = !(busy && t.activity);
     branchButton(x.el, () => x.t);
+    fold(x);
     count();
+  }
+
+  /** A long thread shows only its latest messages, with "Show N earlier" above them. */
+  function fold(x) {
+    const l = x.el.querySelector('.ct-list');
+    if (!l) return;
+    const msgs = [...l.children].filter((n) => n.classList.contains('ct-msg') && !n.classList.contains('ct-typing'));
+    const keep = Math.max(0, Number(o.latest) || 0);
+    const hide = keep && !x.all ? Math.max(0, msgs.length - keep) : 0;
+    const old = new Set(msgs.slice(0, hide));
+    let nextOld = false;
+    for (const n of [...l.children].reverse()) {
+      if (n.classList.contains('ct-msg') && !n.classList.contains('ct-typing')) nextOld = old.has(n);
+      else if (!n.classList.contains('ct-day')) continue;
+      n.classList.toggle('ct-th-old', n.classList.contains('ct-day') ? nextOld : old.has(n));
+    }
+    let b = l.previousElementSibling?.classList.contains('ct-th-earlier') ? l.previousElementSibling : null;
+    const label = hide ? fill(hide === 1 ? s.earlierOne : s.earlier, { count: hide }) : x.all && keep && msgs.length > keep ? s.latestOnly : '';
+    if (!label) return b?.remove();
+    if (!b) {
+      b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'ct-th-earlier';
+      l.before(b);
+    }
+    b.textContent = label;
   }
 
   /** Threads keep the order they were opened in: the oldest on top. */
@@ -323,6 +354,12 @@ export function createThreads(el, options = {}) {
     if (target.closest('.ct-th-more') === more) {
       el.classList.toggle('ct-threads--hide-resolved');
       count();
+      return;
+    }
+    const earlier = target.closest('.ct-th-earlier');
+    if (earlier) {
+      const y = [...items.values()].find((z) => z.el.contains(earlier));
+      if (y) { y.all = !y.all; fold(y); if (!y.all) bottom(y); }
       return;
     }
     const b = target.closest('.ct-th-branch');

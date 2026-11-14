@@ -204,6 +204,8 @@ box.rename('t2', 'Hosting charged twice', 'Assistant', true);       // an AI's t
 - **Words:** `strings` over `THREAD_STRINGS`; the threads' own messages use `chat.strings`.
 - **Colors:** `--ct-th-*` custom properties on the container, with the same `theme` (`dark`, `light`, `auto`) as the thread.
 
+- **Long threads:** each shows its last `latest` messages (2 by default; `0` shows all) with "Show N earlier messages" above them.
+
 The controller also has `threads()`, `get(id)`, `chat(id)` (that thread's createChat controller), `remove`, `reopen`, `open`, `close`, `updateMessage(id, messageId, patch)`, `setMode`, `setHeader`, `active` and `destroy`.
 
 ## Themes

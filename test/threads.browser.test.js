@@ -181,6 +181,9 @@ test('the list follows a new message only when the reader was at the bottom', as
   const gap = () => p.evaluate((sel) => { const l = document.querySelector(`${sel} .ct-th--active .ct-list`); return l.scrollHeight - l.scrollTop - l.clientHeight; }, team);
   const add = (n) => p.evaluate((count) => { for (let i = 0; i < count; i++) window.demoThreads.team.append('t2', { from: 'other', author: 'Ana', text: `line ${i}\nmore\nmore`, at: new Date().toISOString() }); }, n);
   await add(30);
+  await p.locator(`${team} .ct-th--active .ct-th-earlier`).click();
+  await p.evaluate((sel) => { const l = document.querySelector(`${sel} .ct-th--active .ct-list`); l.scrollTop = l.scrollHeight; }, team);
+  await add(1);
   assert.ok(await gap() < 2, 'at the bottom, it follows');
   await p.evaluate((sel) => { document.querySelector(`${sel} .ct-th--active .ct-list`).scrollTop = 0; }, team);
   await add(1);
@@ -233,6 +236,26 @@ test('threads a page adds after createThreads get the box', async (t) => {
     return { before, active: box.active, fresh: host.querySelector('.ct-th-new').hidden };
   });
   assert.deepEqual(r, { before: false, active: 'q1', fresh: true });
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('a long thread shows its latest messages, the earlier ones behind a button', async (t) => {
+  if (!browser) return t.skip('no browser');
+  const { p, ctx, errors } = await page();
+  await p.evaluate(() => { for (let i = 0; i < 5; i++) window.demoThreads.team.append('t2', { from: 'other', author: 'Ana', text: `n${i}`, at: new Date().toISOString() }); });
+  const th = p.locator(`${team} .ct-th--active`);
+  const shown = () => visible(p, `${team} .ct-th--active .ct-msg`);
+  assert.equal(await shown(), 2);
+  const all = await th.locator('.ct-msg').count();
+  const bt = th.locator('.ct-th-earlier');
+  assert.equal(await bt.textContent(), `Show ${all - 2} earlier messages`);
+  await bt.click();
+  assert.equal(await shown(), all);
+  assert.equal(await bt.textContent(), 'Show only the latest');
+  await bt.click();
+  assert.equal(await shown(), 2);
+  assert.equal(await visible(p, `${team} .ct-th--active .ct-day`) <= 1, true, 'no separator above nothing');
   assert.deepEqual(errors, []);
   await ctx.close();
 });
