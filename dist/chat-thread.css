@@ -567,9 +567,9 @@
 
 /* a long thread: only the latest messages, the rest behind "Show N earlier" */
 .ct-th .ct-th-old:not(.ct-th-out) { display: none; }
-.ct-th .ct-th-in { animation: ct-th-rise 0.22s ease-out; }
-.ct-th .ct-th-out { animation: ct-th-fade 0.18s ease-in forwards; pointer-events: none; }
-@keyframes ct-th-rise { from { opacity: 0; transform: translateY(6px); } }
+.ct-th .ct-th-in { animation: ct-th-rise 0.28s ease-out; }
+.ct-th .ct-th-out { animation: ct-th-fade 0.24s ease-in forwards; pointer-events: none; }
+@keyframes ct-th-rise { from { opacity: 0; transform: translateY(-10px); } }
 @keyframes ct-th-fade { to { opacity: 0; transform: translateY(-4px); } }
 @media (prefers-reduced-motion: reduce) { .ct-th .ct-th-in, .ct-th .ct-th-out { animation: none; } }
 .ct-th-earlier { align-self: center; display: block; margin: 8px auto 0; padding: 4px 12px; border: 1px solid var(--ct-th-earlier-border); border-radius: 999px; background: none; color: var(--ct-th-earlier); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; }

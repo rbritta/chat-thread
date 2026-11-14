@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.3 (2026-11-14)
+
+- The motion of 0.5.2 was lost in a long thread: the earlier messages appeared above the view, all at once. Now the list unrolls (its height grows over 0.28 s) with the latest messages held at the bottom and the earlier ones coming down from above; "Show only the latest" rolls it back while they fade.
+
 ## 0.5.2 (2026-11-14)
 
 - A light motion on "Show N earlier" and "Show only the latest": the earlier messages rise in (fade from 6 px below, 0.22 s); folding back fades them out before they go. None with `prefers-reduced-motion`.

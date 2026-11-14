@@ -1,4 +1,4 @@
-/*! chat-thread v0.5.1 | MIT | https://github.com/rbritta/chat-thread */
+/*! chat-thread v0.5.2 | MIT | https://github.com/rbritta/chat-thread */
 (function (global) {
 'use strict';
 /**
@@ -1526,28 +1526,45 @@ function createThreads(el, options = {}) {
     count();
   }
 
-  /** "Show N earlier" / "Show only the latest", with a light motion: the earlier ones rise in, or fade out before folding. */
+  /** "Show N earlier" / "Show only the latest", with a light motion: the list unrolls upward with the latest kept at
+   *  the bottom and the earlier ones rising in, or rolls back with them fading out. */
   function earlierToggle(x) {
-    const quiet = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
     const l = x.el.querySelector('.ct-list');
-    clearTimeout(x.foldTimer);
-    for (const n of l?.querySelectorAll('.ct-th-in, .ct-th-out') || []) n.classList.remove('ct-th-in', 'ct-th-out');
+    if (!l) return;
+    const quiet = typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    x.roll?.cancel();
+    for (const n of l.querySelectorAll('.ct-th-in, .ct-th-out')) n.classList.remove('ct-th-in', 'ct-th-out');
+    const end = () => { l.scrollTop = l.scrollHeight; };
+    const from = l.offsetHeight;
     if (!x.all) {
-      const shown = [...(l?.querySelectorAll('.ct-th-old') || [])];
+      const shown = [...l.querySelectorAll('.ct-th-old')];
       x.all = true;
       fold(x);
-      if (!quiet) for (const n of shown) n.classList.add('ct-th-in');
+      end();
+      if (quiet || !l.animate) return;
+      for (const n of shown) n.classList.add('ct-th-in');
+      roll(x, l, from, l.offsetHeight, 280);
       return;
     }
+    end();
     x.all = false;
     fold(x);
-    const going = [...(l?.querySelectorAll('.ct-th-old') || [])];
-    if (quiet || !going.length) return bottom(x);
+    const going = [...l.querySelectorAll('.ct-th-old')];
+    const to = l.offsetHeight;
+    if (quiet || !l.animate || !going.length) return end();
     for (const n of going) n.classList.add('ct-th-out');
-    x.foldTimer = setTimeout(() => {
-      for (const n of going) n.classList.remove('ct-th-out');
-      bottom(x);
-    }, 180);
+    end();
+    roll(x, l, l.offsetHeight, to, 240).then(() => { for (const n of going) n.classList.remove('ct-th-out'); end(); });
+  }
+
+  /** Animates the list's height, keeping its bottom (the latest messages) in place. */
+  function roll(x, l, from, to, ms) {
+    const run = l.animate([{ height: `${from}px` }, { height: `${to}px` }], { duration: ms, easing: 'cubic-bezier(0.2, 0, 0, 1)' });
+    x.roll = run;
+    let on = true;
+    const stick = () => { if (!on) return; l.scrollTop = l.scrollHeight; requestAnimationFrame(stick); };
+    requestAnimationFrame(stick);
+    return run.finished.catch(() => {}).then(() => { on = false; if (x.roll === run) x.roll = null; });
   }
 
   /** A long thread shows only its latest messages, with "Show N earlier" above them. */
