@@ -263,17 +263,21 @@ test('auto: dark by default, light when the system is light, and <html data-them
   };
   const setTheme = (value) => p.evaluate((v) => { if (v === null) delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = v; }, value);
   const seen = {};
+  let noPreferenceIsLight = false;
   for (const scheme of ['light', 'dark', 'no-preference']) {
     await p.emulateMedia({ colorScheme: scheme });
+    // some Chrome builds answer no-preference as light: then the system is light, and so is the thread
+    if (scheme === 'no-preference') noPreferenceIsLight = await p.evaluate(() => matchMedia('(prefers-color-scheme: light)').matches);
     for (const theme of [null, 'light', 'dark', 'sepia']) {
       await setTheme(theme);
       seen[`${scheme}/${theme}`] = await read();
     }
   }
+  const unset = noPreferenceIsLight ? 'light' : 'dark';
   assert.deepEqual(seen, {
     'light/null': 'light', 'light/light': 'light', 'light/dark': 'dark', 'light/sepia': 'light',
     'dark/null': 'dark', 'dark/light': 'light', 'dark/dark': 'dark', 'dark/sepia': 'dark',
-    'no-preference/null': 'dark', 'no-preference/light': 'light', 'no-preference/dark': 'dark', 'no-preference/sepia': 'dark',
+    'no-preference/null': unset, 'no-preference/light': 'light', 'no-preference/dark': 'dark', 'no-preference/sepia': unset,
   });
 
   // the demo's buttons set and clear it

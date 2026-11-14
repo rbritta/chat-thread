@@ -286,7 +286,10 @@ test('markdown: a fence may carry more than the language, and "# C#" keeps its #
 });
 
 test('a bad locale falls back without losing the time zone, and never throws', () => {
-  assert.equal(formatTime('2026-11-13T02:30:00Z', { locale: 'not a locale', timeZone: 'Asia/Tokyo' }), '11:30');
+  // the runtime's own language (12 or 24 hours, as the machine is set), still in Tokyo time
+  const fallback = formatTime('2026-11-13T02:30:00Z', { locale: 'not a locale', timeZone: 'Asia/Tokyo' });
+  assert.equal(fallback, formatTime('2026-11-13T02:30:00Z', { timeZone: 'Asia/Tokyo' }));
+  assert.match(fallback, /^11:30/);
   const html = renderThread([{ text: 'x', at: '2026-11-10T10:00:00Z' }], { locale: 'not a locale', timeZone: 'UTC', now: NOW });
   assert.match(html, /class="ct-day"[^>]*>[A-Z]/);
 });
