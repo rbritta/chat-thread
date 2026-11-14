@@ -28,8 +28,9 @@ after(async () => {
   server?.close();
 });
 
-async function page(width = 1200, height = 900, { colorScheme = 'dark' } = {}) {
-  const ctx = await browser.newContext({ viewport: { width, height }, colorScheme });
+// Motion is reduced unless a test asks for it, so what a test reads right after a click is final.
+async function page(width = 1200, height = 900, { colorScheme = 'dark', reducedMotion = 'reduce' } = {}) {
+  const ctx = await browser.newContext({ viewport: { width, height }, colorScheme, reducedMotion });
   // every CSP violation lands in the errors, even one the console would not show
   await ctx.addInitScript(() => document.addEventListener('securitypolicyviolation', (e) => console.error(`CSP: ${e.violatedDirective} ${e.blockedURI}`)));
   const p = await ctx.newPage();
@@ -61,6 +62,10 @@ test('the demo renders every mode with no errors and no CSP violations', async (
   assert.equal(await count(`${thread('booking')} .ct-msg--note`), 2);
   assert.equal(await count(`${thread('reminders')} .ct.ct--auto`), 1);
   assert.equal(await count(`${thread('reminders')} .ct-msg--note.ct-msg--alert`), 1);
+  for (const name of ['task', 'session', 'directions', 'reading', 'log', 'reminders']) {
+    assert.equal(await count(`${thread(name)} .ct.ct--auto`), 1, `${name} follows the page's theme`);
+  }
+  assert.equal(await count(`${thread('log')} .ct-author--1, ${thread('log')} .ct-author--2, ${thread('log')} .ct-author--3`), 2, 'hydrated with no options: they came with the markup');
   assert.equal(await p.locator(`${thread('task')} .ct-day`).first().textContent(), 'Today');
   const weekday = await p.evaluate(() => new Date(Date.now() - 3 * 864e5).toLocaleDateString(undefined, { weekday: 'long' }));
   assert.equal((await p.locator(`${thread('log')} .ct-day`).textContent()).toLowerCase(), weekday.toLowerCase());
@@ -354,23 +359,6 @@ test('a note: no bubble, the whole width, the theme\'s text, markdown, a quiet t
   await ctx.close();
 });
 
-for (const width of [360, 1200]) {
-  test(`no horizontal scroll at ${width} px`, async (t) => {
-    if (!browser) return t.skip('no browser');
-    const { p, ctx, errors } = await page(width, 800);
-    await p.fill(`${thread('session')} .ct-input`, 'x'.repeat(400));
-    await p.click(`${thread('session')} .ct-send`);
-    const { scroll, client } = await p.evaluate(() => ({ scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth }));
-    assert.ok(scroll <= client, `page is ${scroll}px wide in a ${client}px window`);
-    const wide = await p.evaluate(() => [...document.querySelectorAll('.ct-msg')].filter((el) => el.getBoundingClientRect().right > document.documentElement.clientWidth + 0.5).length);
-    assert.equal(wide, 0, 'no bubble crosses the right edge');
-    const notes = await p.evaluate(() => [...document.querySelectorAll('.ct-msg--note')].map((el) => Math.round(el.closest('.ct-list').getBoundingClientRect().width - el.getBoundingClientRect().width)));
-    assert.deepEqual([...new Set(notes)], [0], 'every note takes the whole width');
-    assert.deepEqual(errors, []);
-    await ctx.close();
-  });
-}
-
 test('the API: hydrate, waiting, a failed send, update and destroy', async (t) => {
   if (!browser) return t.skip('no browser');
   const { p, ctx } = await page();
@@ -394,13 +382,14 @@ test('the API: hydrate, waiting, a failed send, update and destroy', async (t) =
     await chat.send('hello');
     out.failed = failed;
     out.alert = el.querySelector('.ct-msg--mine').className;
+    out.failedMark = el.querySelector('.ct-msg--mine .ct-tick--failed')?.getAttribute('aria-label');
     chat.append({ from: 'other', text: 'back online' });
     out.waitingAfterReply = el.querySelectorAll('.ct-waiting').length;
     const m = chat.append({ from: 'me', text: 'sent', state: 'sent' });
     chat.updateMessage(m.id, { state: 'read' });
     out.readTicks = el.querySelectorAll('.ct-msg--mine .ct-tick--read').length;
     chat.update({ messages: [{ from: 'other', text: 'fresh' }], typing: 'Bot' });
-    out.afterUpdate = [el.querySelectorAll('.ct-msg:not(.ct-typing)').length, el.querySelector('.ct-typing')?.getAttribute('aria-label')];
+    out.afterUpdate = [el.querySelectorAll('.ct-msg:not(.ct-typing)').length, el.querySelector('.ct-typing .ct-sr')?.textContent];
     chat.configure({ mode: 'readonly' });
     out.readonly = el.querySelector('.ct-composer') === null;
     chat.destroy();
@@ -412,6 +401,7 @@ test('the API: hydrate, waiting, a failed send, update and destroy', async (t) =
     waiting: 'Bot has not replied yet…',
     failed: 'offline',
     alert: 'ct-msg ct-msg--mine ct-msg--alert',
+    failedMark: 'Not sent',
     waitingAfterReply: 0,
     readTicks: 1,
     afterUpdate: [1, 'Bot is typing'],
@@ -420,3 +410,571 @@ test('the API: hydrate, waiting, a failed send, update and destroy', async (t) =
   });
   await ctx.close();
 });
+
+// A thread of a test's own, at the top of the demo page: `await window.sandbox(options, html?)` inside p.evaluate.
+// `options: null` only draws the html. Installed through evaluate: the demo's CSP refuses inline scripts.
+const installSandbox = (p) => p.evaluate(() => {
+  window.sandbox = async (options = {}, html) => {
+    const lib = await import('/src/chat-thread.js');
+    const el = document.createElement('div');
+    el.className = 'sandbox';
+    document.querySelector('main').prepend(el);
+    if (html) el.innerHTML = html(lib);
+    return { lib, el, chat: options === null ? null : lib.createChat(el, options) };
+  };
+});
+
+test('hydrating a server-rendered thread the way an app does: the server\'s options, toggles, a reply that clears waiting, ×, a failure', async (t) => {
+  if (!browser) return t.skip('no browser');
+  const { p, ctx, errors } = await page();
+  // what the server does: renderThread with its options and the waiting line; the page passes only callbacks
+  await p.evaluate(async () => {
+    const { createChat, renderThread } = await import('/src/chat-thread.js');
+    const el = document.createElement('div');
+    el.id = 'served';
+    document.querySelector('main').prepend(el);
+    const at = new Date(Date.now() - 60000).toISOString();
+    el.innerHTML = renderThread([
+      { id: 11, from: 'other', author: 'Assistente', text: `Olá! ${'palavra '.repeat(120)}`, at },
+      { id: 12, from: 'me', text: 'depois', state: 'queued', at },
+    ], {
+      timeZone: 'Asia/Tokyo', locale: 'pt-BR', author: 'Assistente',
+      strings: { placeholder: 'Mensagem', more: 'Ler mais', less: 'Mostrar menos', failed: 'Não enviada' },
+      toggles: [{ name: 'close', label: 'Fechar ao terminar' }],
+    }, { waiting: true });
+    window.calls = [];
+    window.failNext = false;
+    window.served = createChat(el, {
+      hydrate: true,
+      onSend: async (text, { toggles }) => {
+        window.calls.push(['send', text, toggles]);
+        if (window.failNext) throw new Error('offline');
+        return { id: 99, state: 'sent' };
+      },
+      onRemove: (message) => { window.calls.push(['remove', message.id]); },
+      onError: (err) => { window.calls.push(['error', err.message]); },
+    });
+  });
+  const served = p.locator('#served');
+  assert.equal(await served.locator('.ct-input').getAttribute('placeholder'), 'Mensagem');
+  await served.locator('.ct-more').click();
+  assert.equal(await served.locator('.ct-more').textContent(), 'Mostrar menos', 'the words came from the markup');
+
+  await served.locator('.ct-toggles input[name=close]').check();
+  await served.locator('.ct-input').fill('oi');
+  await served.locator('.ct-input').press('Enter');
+  const sent = served.locator('.ct-msg--mine[data-id="99"]');
+  await sent.waitFor();
+  const tokyo = await p.evaluate(() => {
+    const now = new Date();
+    const time = new Intl.DateTimeFormat('pt-BR', { timeZone: 'Asia/Tokyo', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(now);
+    const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Tokyo' }).format(now);
+    return { time, day };
+  });
+  assert.equal(await sent.locator('time').textContent(), tokyo.time, 'in the server\'s time zone');
+  assert.equal(await sent.getAttribute('data-day'), tokyo.day);
+  assert.equal(await served.locator('.ct-waiting').count(), 1, 'sending does not answer for the other side');
+
+  await p.evaluate(() => window.served.append({ id: 100, from: 'other', text: 'Pronto.' }));
+  assert.equal(await served.locator('.ct-waiting').count(), 0, 'the reply clears the waiting line the server drew');
+  assert.equal(await served.locator('.ct-msg--theirs').last().locator('.ct-author').textContent(), 'Assistente');
+  await p.evaluate(() => window.served.setTyping(true));
+  assert.equal(await served.locator('.ct-typing .ct-sr').textContent(), 'Assistente is typing');
+  await p.evaluate(() => window.served.setTyping(false));
+
+  await served.locator('.ct-remove').click();
+  assert.equal(await served.locator('.ct-msg--queued').count(), 0);
+
+  await p.evaluate(() => { window.failNext = true; });
+  await served.locator('.ct-input').fill('de novo');
+  await served.locator('.ct-input').press('Enter');
+  await served.locator('.ct-tick--failed').waitFor();
+  assert.equal(await served.locator('.ct-tick--failed').getAttribute('aria-label'), 'Não enviada');
+  assert.deepEqual(await p.evaluate(() => window.calls), [
+    ['send', 'oi', { close: true }], ['remove', '12'], ['send', 'de novo', { close: true }], ['error', 'offline'],
+  ]);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('rapid sends: a double Enter or a double click sends once; a double × removes once', async (t) => {
+  if (!browser) return t.skip('no browser');
+  const { p, ctx, errors } = await page();
+  const box = p.locator(`${thread('directions')} .ct-input`);
+  const mine = (text) => p.locator(`${thread('directions')} .ct-msg--mine`, { hasText: text }).count();
+  await box.fill('once');
+  await box.press('Enter');
+  await box.press('Enter');
+  assert.equal(await mine('once'), 1);
+  await box.fill('twice');
+  await p.locator(`${thread('directions')} .ct-send`).dblclick();
+  assert.equal(await mine('twice'), 1);
+
+  await installSandbox(p);
+  const removed = await p.evaluate(async () => {
+    const calls = [];
+    const store = {
+      load: () => [],
+      send: (d) => d,
+      remove: (id) => new Promise((resolve) => setTimeout(() => { calls.push(id); resolve({ ok: true }); }, 60)),
+    };
+    const { el } = await window.sandbox({ store, messages: [{ id: 5, from: 'me', text: 'later', state: 'queued' }] });
+    const x = el.querySelector('.ct-remove');
+    x.click();
+    x.click();
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    return { calls, left: el.querySelectorAll('.ct-msg').length };
+  });
+  assert.deepEqual(removed, { calls: [5], left: 0 });
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('IME: the Enter that picks a word never sends, in Chrome or in Safari\'s order', async (t) => {
+  if (!browser) return t.skip('no browser');
+  const { p, ctx } = await page();
+  await installSandbox(p);
+  const result = await p.evaluate(async () => {
+    const sent = [];
+    const { el } = await window.sandbox({ onSend: (text) => { sent.push(text); } });
+    const input = el.querySelector('.ct-input');
+    input.value = 'にほんご';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    const enter = (init = {}, keyCode) => {
+      const ev = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true, ...init });
+      if (keyCode) Object.defineProperty(ev, 'keyCode', { value: keyCode });
+      input.dispatchEvent(ev);
+    };
+    input.dispatchEvent(new CompositionEvent('compositionstart', { bubbles: true }));
+    enter({ isComposing: true });
+    enter({}, 229);
+    enter();
+    input.dispatchEvent(new CompositionEvent('compositionend', { bubbles: true }));
+    enter();
+    const during = sent.length;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    enter();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    return { during, after: sent };
+  });
+  assert.deepEqual(result, { during: 0, after: ['にほんご'] });
+  await ctx.close();
+});
+
+test('focus: Send keeps it in the box, from the mouse or the keyboard; × gives it to the box; configure keeps it', async (t) => {
+  if (!browser) return t.skip('no browser');
+  const { p, ctx } = await page();
+  const box = p.locator(`${thread('directions')} .ct-input`);
+  const focusedIsBox = () => box.evaluate((el) => document.activeElement === el);
+  await box.fill('by mouse');
+  await p.click(`${thread('directions')} .ct-send`);
+  assert.equal(await focusedIsBox(), true);
+  await box.fill('by keyboard');
+  await box.press('Tab');
+  assert.equal(await p.evaluate(() => document.activeElement.className), 'ct-send');
+  await p.keyboard.press('Enter');
+  assert.equal(await focusedIsBox(), true, 'the button went disabled: the focus came back to the box');
+
+  const remove = p.locator(`${thread('session')} .ct-remove`);
+  await remove.focus();
+  await p.keyboard.press('Enter');
+  await p.locator(`${thread('session')} .ct-msg--queued`).waitFor({ state: 'detached' });
+  assert.equal(await p.evaluate(() => document.activeElement.matches('[data-thread="session"] .ct-input')), true);
+
+  await p.check(`${thread('task')} .ct-toggles input[name=close]`);
+  await p.fill(`${thread('task')} .ct-input`, 'half written');
+  await p.focus(`${thread('task')} .ct-input`);
+  await p.evaluate(() => window.demoChats.task.configure({ strings: { send: 'Go' } }));
+  assert.deepEqual(await p.evaluate(() => {
+    const el = document.querySelector('[data-thread="task"]');
+    return [el.querySelector('.ct-toggles input').checked, el.querySelector('.ct-input').value, document.activeElement === el.querySelector('.ct-input'),
+      el.querySelector('.ct-input').placeholder, el.querySelector('.ct-send').getAttribute('aria-label')];
+  }), [true, 'half written', true, 'Message to Session 2', 'Go'], 'strings merge: the placeholder stays');
+  await ctx.close();
+});
+
+test('keyboard: with enterSends off, Enter breaks the line and Ctrl+Enter sends', async (t) => {
+  if (!browser) return t.skip('no browser');
+  const { p, ctx } = await page();
+  await installSandbox(p);
+  await p.evaluate(async () => {
+    window.sent = [];
+    await window.sandbox({ enterSends: false, onSend: (text) => { window.sent.push(text); } });
+  });
+  const box = p.locator('.sandbox .ct-input');
+  assert.equal(await box.getAttribute('enterkeyhint'), 'enter');
+  await box.click();
+  await box.pressSequentially('one');
+  await box.press('Enter');
+  await box.pressSequentially('two');
+  assert.equal(await box.inputValue(), 'one\ntwo');
+  await box.press('Control+Enter');
+  assert.deepEqual(await p.evaluate(() => window.sent), ['one\ntwo']);
+  await ctx.close();
+});
+
+test('the box grows without scrolling the page back', async (t) => {
+  if (!browser) return t.skip('no browser');
+  const { p, ctx } = await page(1200, 700);
+  // a box already four lines tall, at the very bottom of the page: measuring it must not leave the page scrolled back
+  const box = p.locator(`${thread('reminders')} .ct-input`);
+  await box.fill('one\ntwo\nthree\nfour');
+  await p.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+  const before = await p.evaluate(() => window.scrollY);
+  const seen = [];
+  for (const key of ['m', 'o', 'r', 'e', 'Shift+Enter', 'x']) {
+    await box.press(key);
+    seen.push(await p.evaluate(() => window.scrollY));
+  }
+  assert.ok(seen.every((y, i) => y >= (i ? seen[i - 1] : before)), `the page never scrolled back: ${before} ${seen}`);
+  await ctx.close();
+});
+
+test('typing dots: bare dots for a side that narrates in notes, a bubble for one that talks in bubbles', async (t) => {
+  if (!browser) return t.skip('no browser');
+  const { p, ctx, errors } = await page();
+  const reading = p.locator(`${thread('reading')} .ct-typing`);
+  assert.equal(await reading.getAttribute('class'), 'ct-msg ct-msg--theirs ct-typing');
+  await p.click(`${thread('booking')} .ct-chip >> text=16:30`);
+  const typing = p.locator(`${thread('booking')} .ct-typing`);
+  await typing.waitFor();
+  const look = await typing.evaluate((el) => {
+    const s = getComputedStyle(el);
+    const list = el.closest('.ct-list').getBoundingClientRect();
+    const dots = el.querySelector('.ct-dots').getBoundingClientRect();
+    return {
+      cls: el.className, background: s.backgroundColor, border: s.borderTopWidth, names: el.querySelectorAll('.ct-author').length,
+      label: el.querySelector('.ct-sr').textContent, atLeft: dots.left - list.left < 8,
+    };
+  });
+  assert.deepEqual(look, { cls: 'ct-msg ct-msg--note ct-typing', background: 'rgba(0, 0, 0, 0)', border: '0px', names: 0, label: 'Assistant is typing', atLeft: true });
+  await p.locator(`${thread('booking')} .ct-msg--note`, { hasText: 'booked for' }).waitFor();
+  assert.equal(await typing.count(), 0);
+
+  await installSandbox(p);
+  const forced = await p.evaluate(async () => {
+    const { el, chat } = await window.sandbox({ typingKind: 'note', author: 'Bot' });
+    chat.setTyping(true);
+    const empty = el.querySelector('.ct-typing').className;
+    chat.configure({ typingKind: 'bubble' });
+    return [empty, el.querySelector('.ct-typing').className];
+  });
+  assert.deepEqual(forced, ['ct-msg ct-msg--note ct-typing', 'ct-msg ct-msg--theirs ct-typing'], 'the option decides when given');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('motion: messages arrive and leave eased, Read more unrolls, and nothing jumps at the end', async (t) => {
+  if (!browser) return t.skip('no browser');
+  const { p, ctx, errors } = await page(1200, 900, { reducedMotion: 'no-preference' });
+  await installSandbox(p);
+  const result = await p.evaluate(async () => {
+    const out = {};
+    const long = Array.from({ length: 14 }, (_, i) => `line ${i + 1}`).join('\n');
+    const { el, chat } = await window.sandbox({
+      onRemove: () => {},
+      messages: [{ id: 1, from: 'other', text: long }, { id: 2, from: 'me', text: 'later', state: 'queued' }],
+    });
+    const composer = el.querySelector('.ct-composer');
+    const top = () => composer.getBoundingClientRect().top;
+
+    chat.append({ id: 3, from: 'other', text: 'hello' });
+    const arrived = el.querySelector('[data-id="3"]');
+    out.arrives = arrived.getAnimations().length;
+    await Promise.all(arrived.getAnimations().map((a) => a.finished));
+
+    const more = el.querySelector('.ct-more');
+    const body = more.previousElementSibling;
+    const closed = body.offsetHeight;
+    more.click();
+    const [open] = body.getAnimations();
+    out.unrolls = !!open && body.classList.contains('ct-body--clamped');
+    open.pause();
+    open.currentTime = 239;
+    out.openEndsWhereItStays = Math.abs(body.offsetHeight - body.scrollHeight) <= 2;
+    open.play();
+    await open.finished;
+    out.open = !body.classList.contains('ct-body--clamped') && body.offsetHeight > closed + 100;
+
+    const queued = el.querySelector('[data-id="2"]');
+    const gap = parseFloat(getComputedStyle(el.querySelector('.ct-list')).rowGap);
+    const height = queued.offsetHeight;
+    const startTop = top();
+    queued.querySelector('.ct-remove').click();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const [leave] = queued.getAnimations();
+    out.leaves = !!leave && !queued.hasAttribute('data-id') && queued.getAttribute('aria-hidden') === 'true';
+    leave.pause();
+    leave.currentTime = 199;
+    const nearEnd = top();
+    leave.play();
+    await new Promise((resolve) => setTimeout(resolve, 60));
+    out.gone = !queued.isConnected;
+    out.closesItsGap = Math.abs(startTop - top() - height - gap) <= 1;
+    out.noJumpAtTheEnd = Math.abs(nearEnd - top()) <= 1;
+    return out;
+  });
+  assert.deepEqual(result, { arrives: 1, unrolls: true, openEndsWhereItStays: true, open: true, leaves: true, gone: true, closesItsGap: true, noJumpAtTheEnd: true });
+
+  await p.emulateMedia({ reducedMotion: 'reduce' });
+  const still = await p.evaluate(async () => {
+    const { el, chat } = await window.sandbox({ onRemove: () => {}, messages: [{ id: 2, from: 'me', text: 'later', state: 'queued' }] });
+    chat.append({ from: 'other', text: Array.from({ length: 14 }, (_, i) => `line ${i + 1}`).join('\n') });
+    const node = el.querySelector('.ct-msg--theirs');
+    const animations = node.getAnimations().length;
+    node.querySelector('.ct-more').click();
+    el.querySelector('.ct-remove').click();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    return [animations, node.querySelector('.ct-body').getAnimations().length, el.querySelectorAll('.ct-msg--queued').length];
+  });
+  assert.deepEqual(still, [0, 0, 0], 'reduced motion: no animation at all');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('live updates: a redraw keeps Read more open and the focus; an echo of a send is one message', async (t) => {
+  if (!browser) return t.skip('no browser');
+  const { p, ctx, errors } = await page();
+  await installSandbox(p);
+  const result = await p.evaluate(async () => {
+    const out = {};
+    const long = 'word '.repeat(200);
+    let release;
+    const store = { load: () => [], send: (d) => new Promise((resolve) => { release = () => resolve({ ...d, id: 7, state: 'sent' }); }) };
+    const { el, chat } = await window.sandbox({ store, messages: [{ id: 1, from: 'other', text: long }] });
+    const more = el.querySelector('.ct-more');
+    more.focus();
+    more.click();
+    chat.updateMessage(1, { text: `${long} and more` });
+    out.streamedStaysOpen = el.querySelector('.ct-more').getAttribute('aria-expanded') === 'true' && !el.querySelector('.ct-body--clamped');
+    out.focusStays = document.activeElement === el.querySelector('.ct-more');
+
+    const sending = chat.send('hi');
+    chat.append({ id: 7, from: 'me', text: 'hi', state: 'delivered' });   // a live feed echoes it before the store answers
+    release();
+    await sending;
+    out.once = el.querySelectorAll('.ct-msg--mine').length;
+    out.kept = chat.messages.filter((m) => m.text === 'hi').map((m) => [m.id, m.state]);
+    chat.append({ id: 7, from: 'me', text: 'hi', state: 'read' });
+    out.updatedInPlace = [el.querySelectorAll('.ct-msg--mine').length, el.querySelectorAll('.ct-msg--mine .ct-tick--read').length];
+    return out;
+  });
+  assert.deepEqual(result, { streamedStaysOpen: true, focusStays: true, once: 1, kept: [[7, 'sent']], updatedInPlace: [1, 1] });
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('the log: no live region inside it, and a reload is not read out', async (t) => {
+  if (!browser) return t.skip('no browser');
+  const { p, ctx } = await page();
+  await installSandbox(p);
+  const result = await p.evaluate(async () => {
+    const { lib, el, chat } = await window.sandbox({ author: 'Bot', typing: true, waiting: true });
+    const list = el.querySelector('.ct-list');
+    const roles = el.querySelectorAll('[role=status], [aria-live]:not(.ct-list)').length;
+    chat.configure({ store: lib.memoryStore([{ text: 'a' }, { text: 'b' }]) });
+    await chat.reload();
+    const during = el.querySelector('.ct-list').getAttribute('aria-live');
+    await new Promise((resolve) => setTimeout(resolve, 400));
+    return { role: list.getAttribute('role'), roles, during, after: el.querySelector('.ct-list').getAttribute('aria-live'), count: el.querySelectorAll('.ct-msg:not(.ct-typing)').length };
+  });
+  assert.deepEqual(result, { role: 'log', roles: 0, during: 'off', after: null, count: 2 });
+  await ctx.close();
+});
+
+test('edge cases: an empty thread, many messages, a thread hydrated on its own element', async (t) => {
+  if (!browser) return t.skip('no browser');
+  const { p, ctx, errors } = await page();
+  await installSandbox(p);
+  const result = await p.evaluate(async () => {
+    const out = {};
+    const empty = await window.sandbox({ author: 'Bot' });
+    out.empty = empty.el.querySelector('.ct-list').children.length;
+    empty.chat.setTyping(true);
+    await empty.chat.send('first');
+    out.first = [...empty.el.querySelector('.ct-list').children].map((n) => n.className.split(' ').pop());
+
+    const many = Array.from({ length: 1500 }, (_, i) => ({
+      id: i + 1, from: i % 3 ? 'other' : 'me', text: i % 50 ? `message ${i}` : 'long '.repeat(150), at: new Date(Date.now() - (1500 - i) * 36e5).toISOString(),
+    }));
+    const start = performance.now();
+    const big = await window.sandbox({ messages: many, autoScroll: false });
+    out.ms = performance.now() - start;
+    out.count = big.el.querySelectorAll('.ct-msg').length;
+    out.days = big.el.querySelectorAll('.ct-day').length;
+    big.chat.append({ from: 'other', text: 'one more', at: new Date().toISOString() });
+    out.last = big.el.querySelector('.ct-list').lastElementChild.textContent.startsWith('one more');
+
+    const own = await window.sandbox(null, ({ renderThread }) => renderThread([], { theme: 'light' }));
+    const thread = own.el.querySelector('.ct');
+    const self = own.lib.createChat(thread, { hydrate: true });
+    self.configure({ theme: 'auto' });
+    out.ownElement = [self.el === thread, thread.className, thread.querySelectorAll('.ct').length];
+    self.destroy();
+    out.destroyed = [thread.isConnected, thread.children.length];
+    return out;
+  });
+  assert.equal(result.empty, 0);
+  assert.deepEqual(result.first, ['ct-day', 'ct-msg--mine', 'ct-typing'], 'a day, my message, then the dots still waiting');
+  assert.equal(result.count, 1500);
+  assert.ok(result.days > 60);
+  assert.ok(result.ms < 4000, `1500 messages drawn in ${Math.round(result.ms)} ms`);
+  assert.equal(result.last, true);
+  assert.deepEqual(result.ownElement, [true, 'ct ct--auto', 0], 'configure keeps the element the app holds, with no thread inside a thread');
+  assert.deepEqual(result.destroyed, [true, 0]);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('the page switch repaints every thread and the page, the WhatsApp previews keep their skin, and the choice is remembered', async (t) => {
+  if (!browser) return t.skip('no browser');
+  const { p, ctx, errors } = await page(1200, 900, { colorScheme: 'dark' });
+  const paint = () => p.evaluate(() => {
+    const bg = (el) => getComputedStyle(el).backgroundColor;
+    const out = { page: bg(document.body), frame: bg(document.querySelector('#task .frame')) };
+    for (const el of document.querySelectorAll('[data-thread]')) out[el.dataset.thread] = bg(el.querySelector('.ct-msg--mine'));
+    return out;
+  });
+  const DARK = 'rgb(31, 59, 52)';
+  const LIGHT = 'rgb(227, 249, 232)';
+  const WHATSAPP = 'rgb(217, 253, 211)';
+  const expected = (mine, page, frame) => ({
+    page, frame, task: mine, session: mine, directions: mine, reading: mine, log: mine, reminders: mine,
+    booking: LIGHT, reminder: WHATSAPP, scheduled: WHATSAPP,
+  });
+  assert.deepEqual(await paint(), expected(DARK, 'rgb(5, 7, 10)', 'rgb(13, 17, 23)'));
+  await p.click('[data-scheme="light"]');
+  assert.deepEqual(await paint(), expected(LIGHT, 'rgb(255, 255, 255)', 'rgb(245, 246, 248)'));
+  assert.equal(await p.getAttribute('[data-scheme="light"]', 'aria-pressed'), 'true');
+
+  await p.reload();
+  await p.waitForSelector('[data-thread="scheduled"] .ct-msg');
+  assert.equal(await p.evaluate(() => document.documentElement.dataset.theme), 'light', 'remembered');
+  assert.equal(await p.getAttribute('[data-scheme="light"]', 'aria-pressed'), 'true');
+  assert.deepEqual(await paint(), expected(LIGHT, 'rgb(255, 255, 255)', 'rgb(245, 246, 248)'));
+
+  await p.click('[data-scheme="system"]');
+  assert.deepEqual(await p.evaluate(() => [document.documentElement.hasAttribute('data-theme'), localStorage.getItem('chat-thread-demo-theme')]), [false, null]);
+  await p.emulateMedia({ colorScheme: 'light' });
+  assert.equal((await paint()).task, LIGHT, 'System follows the system');
+  await p.click('[data-scheme="dark"]');
+  assert.equal((await paint()).task, DARK, 'Dark wins over a light system');
+
+  // storage refused (a private window, blocked site data): the switch still works
+  const blocked = await browser.newContext({ colorScheme: 'dark', reducedMotion: 'reduce' });
+  await blocked.addInitScript(() => { Object.defineProperty(window, 'localStorage', { get() { throw new Error('blocked'); } }); });
+  const q = await blocked.newPage();
+  const qErrors = [];
+  q.on('pageerror', (e) => qErrors.push(e.message));
+  await q.goto(`${base}/demo/`);
+  await q.click('[data-scheme="light"]');
+  assert.equal(await q.evaluate(() => document.documentElement.dataset.theme), 'light');
+  assert.deepEqual(qErrors, []);
+  await blocked.close();
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+// The colors every thread on the demo page really uses, measured on its own bubbles and page.
+function measureThemes(p) {
+  return p.evaluate(() => {
+    const parse = (c) => (c.match(/[\d.]+/g) || []).map(Number);
+    const over = (fg, bg) => {
+      const [r, g, b, a = 1] = parse(fg);
+      const [R, G, B] = parse(bg);
+      return `rgb(${r * a + R * (1 - a)}, ${g * a + G * (1 - a)}, ${b * a + B * (1 - a)})`;
+    };
+    const pageBehind = (el) => {
+      for (let n = el; n; n = n.parentElement) {
+        const c = getComputedStyle(n).backgroundColor;
+        if (parse(c)[3] !== 0) return c;
+      }
+      return 'rgb(255, 255, 255)';
+    };
+    return [...document.querySelectorAll('.ct')].map((ct) => {
+      const page = pageBehind(ct);
+      const probe = (cls) => {
+        const el = document.createElement('div');
+        el.className = cls;
+        ct.append(el);
+        const c = getComputedStyle(el).backgroundColor;
+        el.remove();
+        return over(c, page);
+      };
+      const color = (name) => {
+        const span = document.createElement('span');
+        span.style.color = `var(--ct-${name})`;
+        ct.append(span);
+        const c = getComputedStyle(span).color;
+        span.remove();
+        return c;
+      };
+      const field = document.createElement('div');
+      field.style.background = 'var(--ct-field)';
+      ct.append(field);
+      const fieldBg = over(getComputedStyle(field).backgroundColor, page);
+      field.style.background = 'var(--ct-day)';
+      const dayBg = over(getComputedStyle(field).backgroundColor, page);
+      field.remove();
+      return {
+        name: `${ct.closest('[data-thread]')?.dataset.thread} (${ct.className})`,
+        whatsapp: ct.classList.contains('ct--whatsapp'),
+        backgrounds: { mine: probe('ct-msg ct-msg--mine'), theirs: probe('ct-msg ct-msg--theirs'), page, field: fieldBg, day: dayBg },
+        colors: Object.fromEntries(['text', 'muted', 'link', 'author', 'title', 'tick', 'author-1', 'author-2', 'author-3', 'author-4', 'author-5', 'author-6'].map((n) => [n, color(n)])),
+      };
+    });
+  });
+}
+
+test('every theme passes WCAG AA: text, muted text, links, names and titles on both bubbles and on the page', async (t) => {
+  if (!browser) return t.skip('no browser');
+  const { p, ctx } = await page();
+  const failing = [];
+  for (const scheme of ['dark', 'light']) {
+    await p.click(`[data-scheme="${scheme}"]`);
+    for (const thread of await measureThemes(p)) {
+      const pairs = [];
+      for (const name of ['text', 'muted', 'link']) for (const where of ['mine', 'theirs', 'page']) pairs.push([name, where]);
+      for (const name of ['author', 'title']) pairs.push([name, 'theirs']);
+      if (!thread.whatsapp) for (const n of [1, 2, 3, 4, 5, 6]) pairs.push([`author-${n}`, 'theirs']);
+      // the read tick is an icon (3:1); WhatsApp's own blue is kept on purpose, its state is in the label
+      if (!thread.whatsapp) for (const where of ['mine', 'page']) pairs.push(['tick', where]);
+      pairs.push(['muted', 'field'], ['muted', 'day'], ['text', 'field']);
+      const ratios = await contrastIn(p, pairs.map(([name, where]) => [thread.colors[name], thread.backgrounds[where]]));
+      pairs.forEach(([name, where], i) => {
+        if (ratios[i] < (name === 'tick' ? 3 : 4.5)) failing.push(`${scheme} page, ${thread.name}: ${name} on ${where} = ${ratios[i].toFixed(2)}`);
+      });
+    }
+  }
+  assert.deepEqual(failing, []);
+  await ctx.close();
+});
+
+for (const width of [360, 1200]) {
+  for (const scheme of ['light', 'dark']) {
+    test(`no horizontal scroll at ${width} px in ${scheme}, with a long code line, a long link and a long word`, async (t) => {
+      if (!browser) return t.skip('no browser');
+      const { p, ctx, errors } = await page(width, 800);
+      await p.click(`[data-scheme="${scheme}"]`);
+      await p.evaluate(() => {
+        const long = `\`\`\`\n${'const value = 1; '.repeat(30)}\n\`\`\`\nhttps://example.com/${'path/'.repeat(40)}\n${'x'.repeat(300)}`;
+        window.demoChats.session.append({ from: 'other', text: long });
+        window.demoChats.booking.append({ from: 'other', kind: 'note', text: long });
+        window.demoChats.directions.append({ from: 'me', text: `${'y'.repeat(300)} https://example.com/${'q'.repeat(200)}` });
+      });
+      const found = await p.evaluate(() => {
+        const client = document.documentElement.clientWidth;
+        const pres = [...document.querySelectorAll('.ct-code pre')].slice(-2);
+        return {
+          scroll: document.documentElement.scrollWidth <= client,
+          outside: [...document.querySelectorAll('.ct-msg, .ct-composer')].filter((el) => el.getBoundingClientRect().right > client + 0.5).length,
+          codeScrollsInside: pres.every((pre) => pre.scrollWidth > pre.clientWidth && pre.getBoundingClientRect().right <= pre.closest('.ct-msg').getBoundingClientRect().right + 0.5),
+          notesFullWidth: [...new Set([...document.querySelectorAll('.ct-msg--note')].map((el) => Math.round(el.closest('.ct-list').getBoundingClientRect().width - el.getBoundingClientRect().width)))],
+        };
+      });
+      assert.deepEqual(found, { scroll: true, outside: 0, codeScrollsInside: true, notesFullWidth: [0] });
+      assert.deepEqual(errors, []);
+      await ctx.close();
+    });
+  }
+}

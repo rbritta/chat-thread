@@ -1,4 +1,4 @@
-/*! chat-thread v0.2.0 | MIT | https://github.com/rbritta/chat-thread */
+/*! chat-thread v0.3.0 | MIT | https://github.com/rbritta/chat-thread */
 (function (global) {
 'use strict';
 /**
@@ -11,7 +11,8 @@
  */
 
 const LIMITS = Object.freeze({ text: 20000, author: 80, title: 200, tag: 120, url: 2048, id: 120, chip: 400, chips: 12, toggles: 8 });
-const STATES = Object.freeze(['pending', 'queued', 'sent', 'delivered', 'read']);
+/** My messages: a clock while `pending` or `queued`, ticks for `sent`, `delivered` and `read`; `failed` when sending threw. */
+const STATES = Object.freeze(['pending', 'queued', 'sent', 'delivered', 'read', 'failed']);
 const FORMATS = Object.freeze(['markdown', 'whatsapp', 'plain']);
 const MODES = Object.freeze(['chat', 'readonly', 'preview']);
 /** `bubble` is a message in a bubble; `note` is the other side narrating, full width, with no bubble. */
@@ -38,6 +39,7 @@ const DEFAULT_STRINGS = Object.freeze({
   sent: 'Sent',
   delivered: 'Delivered',
   read: 'Read',
+  failed: 'Not sent',
   suggestions: 'Suggestions',
 });
 
@@ -54,6 +56,7 @@ const DEFAULTS = Object.freeze({
   enterSends: true,
   autoScroll: true,
   sendState: null,
+  typingKind: 'auto',
   chips: Object.freeze([]),
   toggles: Object.freeze([]),
   locale: undefined,
@@ -63,7 +66,15 @@ const DEFAULTS = Object.freeze({
 
 const RESOLVED = Symbol('chat-thread options');
 const NUL = '\u0000';
-const text = (v, max) => (v === null || v === undefined ? '' : String(v).slice(0, max));
+
+/** A value as text of at most `max` characters, never cutting an emoji (a surrogate pair) in half. */
+function clip(value, max) {
+  if (value === null || value === undefined) return '';
+  const s = String(value);
+  if (s.length <= max) return s;
+  const last = s.charCodeAt(max - 1);
+  return s.slice(0, last >= 0xd800 && last <= 0xdbff ? max - 1 : max);
+}
 
 /**
  * The options with every default filled in and bad values replaced: `mode` falls back to
@@ -74,13 +85,16 @@ function resolveOptions(options = {}) {
   const given = options || {};
   const o = { ...DEFAULTS };
   for (const [k, v] of Object.entries(given)) if (v !== undefined) o[k] = v;
-  o.strings = { ...DEFAULT_STRINGS, ...(given.strings || {}) };
+  o.strings = { ...DEFAULT_STRINGS };
+  const strings = given.strings && typeof given.strings === 'object' ? given.strings : {};
+  for (const [k, v] of Object.entries(strings)) if (v !== undefined && v !== null) o.strings[k] = String(v);
   if (!MODES.includes(o.mode)) o.mode = 'chat';
   if (typeof o.theme !== 'string' || !/^[a-z][a-z0-9-]{0,31}$/.test(o.theme)) o.theme = 'dark';
   if (o.format !== 'auto' && !FORMATS.includes(o.format)) o.format = 'auto';
+  if (o.typingKind !== 'auto' && !KINDS.includes(o.typingKind)) o.typingKind = 'auto';
   o.clamp = Number.isFinite(Number(o.clamp)) ? Math.max(0, Number(o.clamp)) : DEFAULTS.clamp;
   if (o.days === null) o.days = o.mode !== 'preview';
-  o.author = text(o.author, LIMITS.author).trim();
+  o.author = clip(o.author, LIMITS.author).trim();
   o.chips = normalizeChips(o.chips);
   o.toggles = normalizeToggles(o.toggles);
   if (!STATES.includes(o.sendState)) o.sendState = null;
@@ -89,13 +103,17 @@ function resolveOptions(options = {}) {
   return o;
 }
 
-/** Only http(s), relative (`/x`, `./x`, `../x`) and in-page links: never `javascript:` or `data:`. */
+/**
+ * Only http(s), relative (`/x`, `./x`, `../x`) and in-page links: never `javascript:` or `data:`.
+ * Whitespace, control characters and backslashes are refused too: a browser reads `/\host`
+ * as `//host`, which is another site.
+ */
 function safeUrl(value) {
   if (typeof value !== 'string') return null;
   const url = value.trim();
-  if (!url || url.length > LIMITS.url) return null;
-  if (/^(\/(?!\/)|\.{1,2}\/|#|\?)/.test(url)) return /\s/.test(url) ? null : url;
-  return /^https?:\/\/[^\s]+$/i.test(url) ? url : null;
+  if (!url || url.length > LIMITS.url || /[\s\\\u0000-\u001f\u007f]/.test(url)) return null;
+  if (/^(\/(?!\/)|\.{1,2}\/|#|\?)/.test(url)) return url;
+  return /^https?:\/\/./i.test(url) ? url : null;
 }
 
 const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
@@ -115,6 +133,7 @@ function linkify(value) {
   let out = '';
   let last = 0;
   for (const match of raw.matchAll(URL_RE)) {
+    if (!safeUrl(match[0])) continue;
     out += escapeHtml(raw.slice(last, match.index)) + anchor(match[0], escapeHtml(match[0]));
     last = match.index + match[0].length;
   }
@@ -137,23 +156,42 @@ function stasher() {
   };
 }
 
+/** Bare URLs as links, kept away from the passes that follow. */
+const stashUrls = (s, keep) => s.replace(URL_RE, (url) => (safeUrl(url) ? keep(anchor(url, escapeHtml(url))) : url));
+
+/**
+ * Whether the emphasis tags in a piece of HTML close in the order they open. The marks are
+ * matched one kind at a time, so `**a *b** c*` would otherwise cross: `<strong>a <em>b</strong> c</em>`.
+ */
+function balanced(html) {
+  const open = [];
+  for (const [, closing, tag] of html.matchAll(/<(\/?)(strong|em|del)>/g)) {
+    if (!closing) open.push(tag);
+    else if (open.pop() !== tag) return false;
+  }
+  return open.length === 0;
+}
+
+/** A replacer for a mark regex with the groups (before, inner): wraps the inner text when that keeps the tags nested. */
+const wrapIn = (tag) => (whole, before, inner) => (balanced(inner) ? `${before}<${tag}>${inner}</${tag}>` : whole);
+
 function markdownEmphasis(s) {
   return s
-    .replace(/(\*\*|__)(?=\S)([^\n]*?\S)\1/g, '<strong>$2</strong>')
-    .replace(/(^|[^\w*])\*(?=[^\s*])([^\n*]*?[^\s*])\*(?![\w*])/g, '$1<em>$2</em>')
-    .replace(/(^|[^\w])_(?=[^\s_])([^\n_]*?[^\s_])_(?!\w)/g, '$1<em>$2</em>')
-    .replace(/~~(?=\S)([^\n]*?\S)~~/g, '<del>$1</del>');
+    .replace(/()(\*\*|__)(?=\S)([^\n]*?\S)\2/g, (whole, before, mark, inner) => wrapIn('strong')(whole, before, inner))
+    .replace(/(^|[^\w*])\*(?=[^\s*])([^\n*]*?[^\s*])\*(?![\w*])/g, wrapIn('em'))
+    .replace(/(^|[^\w])_(?=[^\s_])([^\n_]*?[^\s_])_(?!\w)/g, wrapIn('em'))
+    .replace(/()~~(?=\S)([^\n]*?\S)~~/g, wrapIn('del'));
 }
 
 /** One line of markdown: `code`, [links](url), bare URLs, **bold**, *italic*, ~~strike~~. */
 function markdownInline(line) {
   const { keep, restore } = stasher();
   let s = line.replace(/`([^`\n]+)`/g, (_, code) => keep(`<code>${escapeHtml(code)}</code>`));
-  s = s.replace(/\[([^\]\n]+)\]\(\s*([^)\s]+)\s*\)/g, (whole, label, url) => {
+  s = s.replace(/\[([^\]\n]{1,500})\]\(\s*([^)\s]+)\s*\)/g, (whole, label, url) => {
     const href = safeUrl(url);
     return href ? keep(anchor(href, markdownEmphasis(escapeHtml(label)))) : whole;
   });
-  s = s.replace(URL_RE, (url) => (safeUrl(url) ? keep(anchor(url, escapeHtml(url))) : url));
+  s = stashUrls(s, keep);
   return restore(markdownEmphasis(escapeHtml(s)));
 }
 
@@ -162,6 +200,9 @@ function codeBlock(code, lang, { copy, strings }) {
   const button = copy ? `<button type="button" class="ct-copy">${escapeHtml(strings.copy)}</button>` : '';
   return `<div class="ct-code"><pre><code${data}>${escapeHtml(code)}</code></pre>${button}</div>`;
 }
+
+// An opening fence: ``` or ~~~, a language, and anything after it (```js title="a.js").
+const FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*([\w#+.-]{0,30})[^`]*$/;
 
 /**
  * A safe subset of markdown, as chat answers use it: paragraphs (single newlines kept),
@@ -185,17 +226,19 @@ function renderMarkdown(value, { copy = true, strings = DEFAULT_STRINGS } = {}) 
   };
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const fence = /^ {0,3}(`{3,}|~{3,})\s*([\w#+.-]{0,30})\s*$/.exec(line);
+    const fence = FENCE.exec(line);
     if (fence) {
       flushPara();
       flushList();
+      const close = new RegExp(`^ {0,3}${fence[1][0] === '`' ? '`' : '~'}{${fence[1].length},}\\s*$`);
       const body = [];
-      while (++i < lines.length && !new RegExp(`^ {0,3}${fence[1][0] === '`' ? '`' : '~'}{${fence[1].length},}\\s*$`).test(lines[i])) body.push(lines[i]);
+      while (++i < lines.length && !close.test(lines[i])) body.push(lines[i]);
       out.push(codeBlock(body.join('\n'), fence[2], { copy, strings }));
       continue;
     }
     if (!line.trim()) { flushPara(); flushList(); continue; }
-    const heading = /^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/.exec(line);
+    // the closing #s need a space before them: "# C#" is about C#
+    const heading = /^ {0,3}#{1,6}\s+(.+?)(?:\s+#+)?\s*$/.exec(line);
     if (heading) {
       flushPara();
       flushList();
@@ -239,9 +282,8 @@ function renderWhatsApp(value) {
   let s = clean(value);
   s = s.replace(/```([\s\S]+?)```/g, (_, code) => keep(`<code class="ct-mono">${escapeHtml(code)}</code>`));
   s = s.replace(/`([^`\n]+)`/g, (_, code) => keep(`<code>${escapeHtml(code)}</code>`));
-  s = s.replace(URL_RE, (url) => (safeUrl(url) ? keep(anchor(url, escapeHtml(url))) : url));
-  s = escapeHtml(s);
-  for (const [re, tag] of WHATSAPP_MARKS) s = s.replace(re, `$1<${tag}>$2</${tag}>`);
+  s = escapeHtml(stashUrls(s, keep));
+  for (const [re, tag] of WHATSAPP_MARKS) s = s.replace(re, wrapIn(tag));
   const html = s.split(/\n[ \t]*\n+/).filter((p) => p.trim()).map((p) => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
   return restore(html);
 }
@@ -269,15 +311,20 @@ const toDate = (at) => {
 const normalizeAt = (at) => toDate(at)?.toISOString() ?? null;
 
 const formatters = new Map();
+/**
+ * A cached Intl.DateTimeFormat. A bad locale or a bad time zone falls back one at a time, so
+ * a typo in the locale still shows the times in the right zone.
+ */
 function formatter(locale, opts) {
   const key = JSON.stringify([locale ?? null, opts]);
   let f = formatters.get(key);
   if (!f) {
-    try {
-      f = new Intl.DateTimeFormat(locale, opts);
-    } catch {
-      const { timeZone: _ignored, ...rest } = opts;
-      f = new Intl.DateTimeFormat(undefined, rest);
+    const { timeZone: _zone, ...anyZone } = opts;
+    for (const [l, o] of [[locale, opts], [undefined, opts], [locale, anyZone], [undefined, anyZone]]) {
+      try {
+        f = new Intl.DateTimeFormat(l, o);
+        break;
+      } catch { /* try the next, simpler one */ }
     }
     formatters.set(key, f);
   }
@@ -301,6 +348,12 @@ function formatTime(at, { locale, timeZone, hour12 = false } = {}) {
   return formatter(locale, opts).format(d);
 }
 
+function capitalize(label, locale) {
+  let first = label.charAt(0);
+  try { first = first.toLocaleUpperCase(locale); } catch { first = first.toUpperCase(); }
+  return first + label.slice(1);
+}
+
 /** The day separator: Today, Yesterday, the weekday within a week, then the date. */
 function dayLabel(key, { now = new Date(), locale, timeZone, strings = DEFAULT_STRINGS } = {}) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(key || '')) return '';
@@ -312,7 +365,7 @@ function dayLabel(key, { now = new Date(), locale, timeZone, strings = DEFAULT_S
   const label = diff > 1 && diff < 7
     ? formatter(locale, { timeZone: 'UTC', weekday: 'long' }).format(noon)
     : formatter(locale, { timeZone: 'UTC', day: 'numeric', month: 'short', ...(key.slice(0, 4) === today.slice(0, 4) ? {} : { year: 'numeric' }) }).format(noon);
-  return label.charAt(0).toLocaleUpperCase(locale) + label.slice(1);
+  return capitalize(label, locale);
 }
 
 /**
@@ -324,18 +377,18 @@ function normalizeMessage(input) {
   const m = input && typeof input === 'object' ? input : {};
   let id = null;
   if (typeof m.id === 'number' && Number.isFinite(m.id)) id = m.id;
-  else if (m.id !== null && m.id !== undefined && m.id !== '') id = String(m.id).slice(0, LIMITS.id);
+  else if (m.id !== null && m.id !== undefined && m.id !== '') id = clip(m.id, LIMITS.id);
   return {
     id,
     from: m.from === 'me' ? 'me' : 'other',
     kind: KINDS.includes(m.kind) ? m.kind : 'bubble',
-    author: text(m.author, LIMITS.author).trim(),
-    text: text(m.text, LIMITS.text),
+    author: clip(m.author, LIMITS.author).trim(),
+    text: clip(m.text, LIMITS.text),
     at: normalizeAt(m.at),
     state: STATES.includes(m.state) ? m.state : null,
     alert: m.alert === true,
-    tag: text(m.tag, LIMITS.tag).trim(),
-    title: text(m.title, LIMITS.title).trim(),
+    tag: clip(m.tag, LIMITS.tag).trim(),
+    title: clip(m.title, LIMITS.title).trim(),
     format: FORMATS.includes(m.format) ? m.format : null,
     meta: m.meta && typeof m.meta === 'object' && !Array.isArray(m.meta) ? m.meta : null,
   };
@@ -346,7 +399,7 @@ function normalizeChips(list) {
   if (!Array.isArray(list)) return [];
   return list
     .map((c) => (typeof c === 'string' ? { label: c } : c && typeof c === 'object' ? c : {}))
-    .map((c) => ({ label: text(c.label, LIMITS.chip).trim(), text: text(c.text ?? c.label, LIMITS.chip).trim(), fill: c.fill === true }))
+    .map((c) => ({ label: clip(c.label, LIMITS.chip).trim(), text: clip(c.text ?? c.label, LIMITS.chip).trim(), fill: c.fill === true }))
     .filter((c) => c.label && c.text)
     .slice(0, LIMITS.chips);
 }
@@ -356,7 +409,7 @@ function normalizeToggles(list) {
   if (!Array.isArray(list)) return [];
   return list
     .filter((t) => t && typeof t === 'object' && /^[\w-]{1,40}$/.test(t.name || ''))
-    .map((t) => ({ name: t.name, label: text(t.label, LIMITS.chip).trim() || t.name, checked: t.checked === true }))
+    .map((t) => ({ name: t.name, label: clip(t.label, LIMITS.chip).trim() || t.name, checked: t.checked === true }))
     .slice(0, LIMITS.toggles);
 }
 
@@ -378,9 +431,10 @@ const TICK_PATH = 'M2 13l4 4 8-9M10 16l1 1 9-10';
 const icon = (cls, label, inner) => `<svg class="ct-tick${cls}" viewBox="0 0 24 24" role="img" aria-label="${escapeHtml(label)}">${inner}</svg>`;
 const SEND_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20.5l18-8.5L3 3.5v6.6l12 1.9-12 1.9z"/></svg>';
 
-/** Ticks of my message: clock while pending or queued, one tick sent, two delivered, two in color read. */
+/** Ticks of my message: clock while pending or queued, one tick sent, two delivered, two in color read, a red mark when it failed. */
 function ticks(state, strings) {
   if (state === 'pending' || state === 'queued') return icon(' ct-tick--clock', strings[state === 'queued' ? 'queued' : 'pending'], '<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>');
+  if (state === 'failed') return icon(' ct-tick--failed', strings.failed, '<circle cx="12" cy="12" r="8"/><path d="M12 7.5v5M12 16.2v.1"/>');
   if (state === 'sent') return icon('', strings.sent, '<path d="M5 13l4 4 10-11"/>');
   if (state === 'delivered') return icon('', strings.delivered, `<path d="${TICK_PATH}"/>`);
   return icon(' ct-tick--read', strings.read, `<path d="${TICK_PATH}"/>`);
@@ -388,6 +442,8 @@ function ticks(state, strings) {
 
 const intoLast = (html, extra) => (html.endsWith('</p>') ? `${html.slice(0, -4)}${extra}</p>` : null);
 const intoFirst = (html, extra) => (/^<p[^>]*>/.test(html) ? html.replace(/^<p[^>]*>/, (open) => open + extra) : `${extra}${html}`);
+const authorLabel = (name, o, attrs = '') =>
+  `<span class="ct-author${o.colorAuthors ? ` ct-author--${authorTone(name)}` : ''}"${attrs}>${escapeHtml(name)}</span>`;
 
 /**
  * One message. `options` are the thread's (see `DEFAULTS`). A `note` has no bubble, no
@@ -405,7 +461,7 @@ function renderMessage(input, options) {
   if (m.alert) classes.push('ct-msg--alert');
 
   const name = mine || note ? '' : m.author || o.author;
-  const author = name ? `<span class="ct-author${o.colorAuthors ? ` ct-author--${authorTone(name)}` : ''}">${escapeHtml(name)}</span>` : '';
+  const author = name ? authorLabel(name, o) : '';
   const title = m.title ? `<p class="ct-title">${escapeHtml(m.title)}</p>` : '';
 
   let body = formatText(m.text, format, { copy: o.copy, strings: s });
@@ -435,20 +491,40 @@ function renderDay(key, options) {
   return `<div class="ct-day" data-day="${escapeHtml(key)}">${escapeHtml(dayLabel(key, { now: o.now(), locale: o.locale, timeZone: o.timeZone, strings: o.strings }))}</div>`;
 }
 
-/** Three bouncing dots on the other side. `author` is shown above them when given. */
-function renderTyping(author, options) {
+/**
+ * Three bouncing dots on the other side. `author` is `true` (the thread's author) or a name.
+ * `kind` is the shape: `bubble`, with the name above the dots, or `note`, bare dots on the
+ * left for a side that narrates. The words ("Assistant is typing") are there for screen
+ * readers only; the thread's log announces them.
+ */
+function renderTyping(author, options, kind = 'bubble') {
   const o = resolveOptions(options);
-  const name = text(author === true ? o.author : author, LIMITS.author).trim();
+  const name = clip(author === true ? o.author : author, LIMITS.author).trim();
   const label = name ? fill(o.strings.typing, { author: name }) : o.strings.typingNoAuthor;
-  const tag = name ? `<span class="ct-author${o.colorAuthors ? ` ct-author--${authorTone(name)}` : ''}">${escapeHtml(name)}</span>` : '';
-  return `<div class="ct-msg ct-msg--theirs ct-typing" role="status" aria-label="${escapeHtml(label)}">${tag}<span class="ct-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>`;
+  const note = kind === 'note';
+  const tag = name && !note ? authorLabel(name, o, ' aria-hidden="true"') : '';
+  const data = name ? ` data-author="${escapeHtml(name)}"` : '';
+  return `<div class="ct-msg ${note ? 'ct-msg--note' : 'ct-msg--theirs'} ct-typing"${data}>${tag}<span class="ct-sr">${escapeHtml(label)}</span><span class="ct-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>`;
 }
 
 /** "Assistant has not replied yet…", in muted italics on the other side. */
 function renderWaiting(author, options) {
   const o = resolveOptions(options);
-  const name = text(author === true ? o.author : author, LIMITS.author).trim();
-  return `<div class="ct-waiting" role="status">${escapeHtml(name ? fill(o.strings.waiting, { author: name }) : o.strings.waitingNoAuthor)}</div>`;
+  const name = clip(author === true ? o.author : author, LIMITS.author).trim();
+  const data = name ? ` data-author="${escapeHtml(name)}"` : '';
+  return `<div class="ct-waiting"${data}>${escapeHtml(name ? fill(o.strings.waiting, { author: name }) : o.strings.waitingNoAuthor)}</div>`;
+}
+
+/**
+ * The shape of the typing dots under `typingKind: 'auto'`: the shape of the last message that
+ * is not a bubble of mine. A side that narrates in notes types as a note.
+ */
+function typingKindOf(messages, o) {
+  if (o.typingKind !== 'auto') return o.typingKind;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].kind === 'note' || messages[i].from !== 'me') return messages[i].kind;
+  }
+  return 'bubble';
 }
 
 /**
@@ -457,10 +533,10 @@ function renderWaiting(author, options) {
  */
 function renderList(messages = [], options = {}, state = {}) {
   const o = resolveOptions(options);
+  const list = (Array.isArray(messages) ? messages : []).map(normalizeMessage);
   const parts = [];
   let last = '';
-  for (const raw of Array.isArray(messages) ? messages : []) {
-    const m = normalizeMessage(raw);
+  for (const m of list) {
     const key = o.days && m.at ? dayKey(m.at, o) : '';
     if (key && key !== last) {
       parts.push(renderDay(key, o));
@@ -468,7 +544,7 @@ function renderList(messages = [], options = {}, state = {}) {
     }
     parts.push(renderMessage(m, o));
   }
-  if (state.typing) parts.push(renderTyping(state.typing, o));
+  if (state.typing) parts.push(renderTyping(state.typing, o, typingKindOf(list, o)));
   if (state.waiting) parts.push(renderWaiting(state.waiting, o));
   return parts.join('');
 }
@@ -484,7 +560,27 @@ function renderComposer(options) {
   const toggles = o.toggles.length
     ? `<div class="ct-toggles">${o.toggles.map((t) => `<label><input type="checkbox" name="${escapeHtml(t.name)}"${t.checked ? ' checked' : ''}> ${escapeHtml(t.label)}</label>`).join('')}</div>`
     : '';
-  return `<div class="ct-composer">${chips}<div class="ct-row"><div class="ct-field"><textarea class="ct-input" rows="1" maxlength="${LIMITS.text}" placeholder="${escapeHtml(s.placeholder)}" aria-label="${escapeHtml(s.placeholder)}"></textarea></div><button type="button" class="ct-send" disabled aria-label="${escapeHtml(s.send)}" title="${escapeHtml(s.send)}">${SEND_ICON}</button></div>${toggles}</div>`;
+  // enterkeyhint: a phone's keyboard labels its Enter key "send" when Enter sends
+  return `<div class="ct-composer">${chips}<div class="ct-row"><div class="ct-field"><textarea class="ct-input" rows="1" maxlength="${LIMITS.text}" enterkeyhint="${o.enterSends ? 'send' : 'enter'}" placeholder="${escapeHtml(s.placeholder)}" aria-label="${escapeHtml(s.placeholder)}"></textarea></div><button type="button" class="ct-send" disabled aria-label="${escapeHtml(s.send)}" title="${escapeHtml(s.send)}">${SEND_ICON}</button></div>${toggles}</div>`;
+}
+
+// The options a browser needs to go on drawing a server-rendered thread the same way.
+const CARRIED = ['theme', 'format', 'author', 'colorAuthors', 'ticks', 'clamp', 'copy', 'enterSends', 'sendState', 'typingKind', 'locale', 'timeZone', 'hour12'];
+
+/**
+ * The options that differ from the defaults, for the thread's `data-options`: with them,
+ * `createChat(el, { hydrate: true })` draws new messages, times, day separators and every
+ * word the way the server did, without the page passing them again.
+ */
+function carriedOptions(o) {
+  const out = {};
+  for (const key of CARRIED) if (o[key] !== undefined && o[key] !== DEFAULTS[key]) out[key] = o[key];
+  if (o.days !== (o.mode !== 'preview')) out.days = o.days;
+  if (o.chips.length) out.chips = o.chips;
+  if (o.toggles.length) out.toggles = o.toggles;
+  const strings = Object.fromEntries(Object.entries(o.strings).filter(([k, v]) => v !== DEFAULT_STRINGS[k]));
+  if (Object.keys(strings).length) out.strings = strings;
+  return Object.keys(out).length ? JSON.stringify(out) : '';
 }
 
 /**
@@ -496,7 +592,9 @@ function renderThread(messages = [], options = {}, state = {}) {
   const classes = ['ct'];
   if (o.theme !== 'dark') classes.push(`ct--${o.theme}`);
   if (o.mode !== 'chat') classes.push(`ct--${o.mode}`);
-  return `<div class="${classes.join(' ')}" data-mode="${o.mode}"><div class="ct-list" role="log" aria-label="${escapeHtml(o.strings.thread)}">${renderList(messages, o, state)}</div>${o.mode === 'chat' ? renderComposer(o) : ''}</div>`;
+  const carried = carriedOptions(o);
+  const data = carried ? ` data-options="${escapeHtml(carried)}"` : '';
+  return `<div class="${classes.join(' ')}" data-mode="${o.mode}"${data}><div class="ct-list" role="log" aria-label="${escapeHtml(o.strings.thread)}">${renderList(messages, o, state)}</div>${o.mode === 'chat' ? renderComposer(o) : ''}</div>`;
 }
 
 /**
@@ -516,18 +614,83 @@ function renderThread(messages = [], options = {}, state = {}) {
  * The thread never talks to a server by itself: sending goes through `store.send` or
  * `onSend` (see `restStore` for the HTTP client and `server/` for the Node side). The HTML
  * comes from `renderThread` in core.js, so a server can draw the same thread and this
- * script only hydrates it (`hydrate: true`).
+ * script only hydrates it (`hydrate: true`), with the options the server wrote into it.
  */
 
 
 let sequence = 0;
 
 const reportError = (err) => console.error('[chat-thread]', err);
+const sameId = (a, b) => String(a) === String(b);
 
 function fragment(html) {
   const tpl = document.createElement('template');
   tpl.innerHTML = html;
   return tpl.content;
+}
+
+// Motion is short and eased out (quick, then settling softly, so nothing snaps into place at
+// the end), and there is none when the system asks for less.
+const EASE_OUT = 'cubic-bezier(.2, 0, 0, 1)';
+const motionAllowed = () => !globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+/** A new node fades in and rises a few pixels; a transform, so nothing around it moves. */
+function animateIn(node) {
+  if (!node?.animate || !motionAllowed()) return;
+  node.animate([{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 200, easing: EASE_OUT });
+}
+
+/**
+ * Nodes leaving the list fade out while their height closes, so what is below slides up
+ * instead of jumping; then they are removed. A negative margin on the side where the list's
+ * gap is closes the gap and the borders with them (border widths snap to whole pixels, so
+ * they are not animated), and the last frame matches the layout after the removal.
+ */
+function animateOut(nodes, gap) {
+  if (!motionAllowed()) {
+    for (const node of nodes) node.remove();
+    return Promise.resolve();
+  }
+  const last = (node) => {
+    for (let n = node.nextElementSibling; n; n = n.nextElementSibling) if (!nodes.includes(n)) return false;
+    return true;
+  };
+  return Promise.all(nodes.map((node) => {
+    if (!node.animate) return node.remove();
+    const s = getComputedStyle(node);
+    const close = `${-(gap + parseFloat(s.borderTopWidth) + parseFloat(s.borderBottomWidth))}px`;
+    const from = { opacity: 1, height: `${node.offsetHeight}px`, paddingTop: s.paddingTop, paddingBottom: s.paddingBottom, marginTop: s.marginTop, marginBottom: s.marginBottom };
+    const to = {
+      opacity: 0, height: '0px', paddingTop: '0px', paddingBottom: '0px',
+      marginTop: last(node) ? close : '0px', marginBottom: last(node) ? '0px' : close,
+    };
+    node.style.overflow = 'hidden';
+    return node.animate([from, to], { duration: 200, easing: EASE_OUT }).finished.catch(() => {}).then(() => node.remove());
+  }));
+}
+
+/** The thread to hydrate: `el` itself or the `.ct` inside it. */
+function findThread(el) {
+  const root = el.classList?.contains('ct') ? el : el.querySelector('.ct');
+  if (!root) throw new Error('createChat: nothing to hydrate; render the thread with renderThread() first');
+  return root;
+}
+
+/** The options a server wrote into the thread (`renderThread` puts them in `data-options`). */
+function carriedBy(root) {
+  let carried = {};
+  try { carried = JSON.parse(root.dataset.options || '{}'); } catch { /* markup without them: nothing carried */ }
+  if (!carried || typeof carried !== 'object' || Array.isArray(carried)) carried = {};
+  if (root.dataset.mode) carried.mode = root.dataset.mode;
+  return carried;
+}
+
+/** `next` over `base`: values left undefined keep the old ones, and `strings` merge word by word. */
+function mergeOptions(base, next = {}) {
+  const out = { ...base };
+  for (const [k, v] of Object.entries(next)) if (v !== undefined) out[k] = v;
+  if (base.strings || next.strings) out.strings = { ...base.strings, ...next.strings };
+  return out;
 }
 
 /**
@@ -537,20 +700,32 @@ function fragment(html) {
  */
 function createChat(el, options = {}) {
   if (!el) throw new Error('createChat needs an element');
-  let given = { ...options };
+  const hydrating = options?.hydrate === true;
+  let root = hydrating ? findThread(el) : null;
+  let given = hydrating ? mergeOptions(carriedBy(root), options) : { ...options };
   let opts = resolveOptions(given);
   let messages = (given.messages || []).map(normalizeMessage);
   let typing = given.typing || false;
   let waiting = given.waiting || false;
-  let root = null;
   let list = null;
   let input = null;
   let sendButton = null;
+  let composing = false;
+  let composeEnd = null;
+  let quiet = null;
   const timers = new Set();
+  const painted = new WeakMap();   // the typing or waiting node -> the state it shows
+  const removing = new WeakSet();  // queued messages whose × was already pressed
+  const copied = new WeakMap();    // Copy button -> the timer that turns "Copied" back
 
   const later = (fn, ms) => {
     const t = setTimeout(() => { timers.delete(t); fn(); }, ms);
     timers.add(t);
+    return t;
+  };
+  const cancel = (t) => {
+    clearTimeout(t);
+    timers.delete(t);
   };
   const fail = (err) => {
     (given.onError || reportError)(err);
@@ -560,35 +735,53 @@ function createChat(el, options = {}) {
     try { given.onChange?.(event); } catch (err) { fail(err); }
   };
 
+  const listeners = [
+    ['click', onClick], ['keydown', onKeydown], ['input', onInput], ['mousedown', onMouseDown],
+    ['compositionstart', onComposition], ['compositionend', onComposition],
+  ];
+
   function mount(hydrate) {
-    if (hydrate) {
-      root = el.classList.contains('ct') ? el : el.querySelector('.ct');
-      if (!root) throw new Error('createChat: nothing to hydrate; render the thread with renderThread() first');
-    } else {
-      el.replaceChildren(fragment(renderThread(messages, opts, { typing, waiting })));
-      root = el.firstElementChild;
-    }
+    if (!hydrate) place(fragment(renderThread(messages, opts, { typing, waiting })).firstElementChild);
     list = root.querySelector('.ct-list');
     input = root.querySelector('.ct-input');
     sendButton = root.querySelector('.ct-send');
-    root.addEventListener('click', onClick);
-    root.addEventListener('keydown', onKeydown);
-    root.addEventListener('input', onInput);
+    for (const [type, fn] of listeners) root.addEventListener(type, fn);
+    if (hydrate) adoptIndicators();
+    else markIndicators();
     settle(root);
     grow();
   }
 
   function unmount() {
     if (!root) return;
-    root.removeEventListener('click', onClick);
-    root.removeEventListener('keydown', onKeydown);
-    root.removeEventListener('input', onInput);
+    for (const [type, fn] of listeners) root.removeEventListener(type, fn);
+  }
+
+  /** Puts a freshly drawn thread where the old one is, keeping the element the app holds. */
+  function place(fresh) {
+    if (root === el) {
+      // hydrated on the thread element itself: it stays, and takes the new one's attributes and insides
+      for (const name of ['class', 'data-mode', 'data-options']) {
+        const value = fresh.getAttribute(name);
+        if (value === null) el.removeAttribute(name);
+        else el.setAttribute(name, value);
+      }
+      el.replaceChildren(...fresh.childNodes);
+    } else if (root?.parentNode) {
+      root.replaceWith(fresh);
+      root = fresh;
+    } else {
+      el.replaceChildren(fresh);
+      root = fresh;
+    }
   }
 
   /** Long messages start collapsed; the ones that fit after all lose the "Read more". */
   function settle(scope) {
-    for (const body of scope.querySelectorAll('.ct-body--clamped')) {
-      if (!body.clientHeight || body.scrollHeight > body.clientHeight + 2) continue;
+    // measure all first, then change: one layout for the whole list, not one per message
+    const fits = [...scope.querySelectorAll('.ct-body--clamped')]
+      .filter((body) => body.clientHeight && body.scrollHeight <= body.clientHeight + 2);
+    for (const body of fits) {
       body.classList.remove('ct-body--clamped');
       const msg = body.parentElement;
       msg.querySelector(':scope > .ct-more')?.remove();
@@ -601,25 +794,101 @@ function createChat(el, options = {}) {
   /** The box grows with the text up to six lines, then scrolls. */
   function grow() {
     if (!input) return;
+    const field = input.parentElement;
+    // Measuring needs the box at its smallest for a moment. Its frame keeps the current height
+    // meanwhile, so the page never gets shorter: at the bottom of a page, a shorter page clamps
+    // the scroll, and not every engine puts it back once the box is tall again.
+    field.style.minHeight = `${field.offsetHeight}px`;
     input.style.height = 'auto';
     const line = parseFloat(getComputedStyle(input).lineHeight) || 21;
     const max = line * 6;
-    input.style.height = `${Math.min(input.scrollHeight, max)}px`;
-    input.style.overflowY = input.scrollHeight > max + 1 ? 'auto' : 'hidden';
+    const full = input.scrollHeight;
+    input.style.height = `${Math.min(full, max)}px`;
+    input.style.overflowY = full > max + 1 ? 'auto' : 'hidden';
+    field.style.removeProperty('min-height');
     if (sendButton) sendButton.disabled = !input.value.trim();
   }
 
+  /**
+   * Changes the whole list without the log reading it all out: a live region announces
+   * what is added to it, and a reload is not news. New messages are announced again a
+   * moment later.
+   */
+  function quietly(change) {
+    if (quiet) cancel(quiet.timer);
+    else quiet = { before: list.getAttribute('aria-live') };
+    list.setAttribute('aria-live', 'off');
+    change();
+    const target = list;
+    quiet.timer = later(() => {
+      if (quiet.before === null) target.removeAttribute('aria-live');
+      else target.setAttribute('aria-live', quiet.before);
+      quiet = null;
+    }, 300);
+  }
+
   function drawList() {
-    list.replaceChildren(fragment(renderList(messages, opts, { typing, waiting })));
+    quietly(() => list.replaceChildren(fragment(renderList(messages, opts, { typing, waiting }))));
+    markIndicators();
     settle(list);
   }
 
+  const indicator = (cls) => list.querySelector(`:scope > .${cls}`);
+
+  /** What the typing and waiting nodes should show, as comparable keys ('' for nothing). */
+  function indicatorKeys() {
+    return {
+      'ct-typing': typing ? JSON.stringify([typing, typingShape()]) : '',
+      'ct-waiting': waiting ? JSON.stringify([waiting]) : '',
+    };
+  }
+
+  /** Records that the typing and waiting nodes on screen show the current state. */
+  function markIndicators() {
+    const keys = indicatorKeys();
+    for (const [cls, key] of Object.entries(keys)) {
+      const node = indicator(cls);
+      if (node) painted.set(node, key);
+    }
+  }
+
+  /** A hydrated thread starts with the typing and waiting lines the server drew (a reply then clears them). */
+  function adoptIndicators() {
+    const shown = (node) => (node ? node.dataset.author || true : false);
+    typing = shown(indicator('ct-typing'));
+    waiting = shown(indicator('ct-waiting'));
+    markIndicators();
+    // options given to createChat that ask for something else win, and the lines change to match
+    if (given.typing !== undefined) typing = given.typing || false;
+    if (given.waiting !== undefined) waiting = given.waiting || false;
+    drawIndicators();
+  }
+
+  /** Redraws the typing and waiting lines that changed, and only those (so they do not blink). */
   function drawIndicators() {
-    for (const node of list.querySelectorAll(':scope > .ct-typing, :scope > .ct-waiting')) node.remove();
-    let html = '';
-    if (typing) html += renderTyping(typing, opts);
-    if (waiting) html += renderWaiting(waiting, opts);
-    if (html) list.append(fragment(html));
+    const keys = indicatorKeys();
+    for (const cls of ['ct-typing', 'ct-waiting']) {
+      const node = indicator(cls);
+      if (node && painted.get(node) === keys[cls]) continue;
+      node?.remove();
+      if (!keys[cls]) continue;
+      const html = cls === 'ct-typing' ? renderTyping(typing, opts, typingShape()) : renderWaiting(waiting, opts);
+      const fresh = fragment(html).firstElementChild;
+      painted.set(fresh, keys[cls]);
+      list.insertBefore(fresh, cls === 'ct-typing' ? indicator('ct-waiting') : null);
+      animateIn(fresh);
+    }
+  }
+
+  /** `typingKind: 'auto'`: the dots take the shape of the last message that is not a bubble of mine. */
+  function typingShape() {
+    if (opts.typingKind !== 'auto') return opts.typingKind;
+    for (let n = list.lastElementChild; n; n = n.previousElementSibling) {
+      const c = n.classList;
+      if (!c.contains('ct-msg') || c.contains('ct-typing') || c.contains('ct-msg--mine')) continue;
+      return c.contains('ct-msg--note') ? 'note' : 'bubble';
+    }
+    return 'bubble';
   }
 
   function lastDay() {
@@ -627,29 +896,35 @@ function createChat(el, options = {}) {
     return days.length ? days[days.length - 1].dataset.day : '';
   }
 
-  /** Adds one bubble at the end (before the typing and waiting lines) and returns its node. */
-  function insert(message, scroll = true) {
-    const html = [];
+  /** Adds one message at the end (before the typing and waiting lines) and returns its node. */
+  function insert(message) {
     const key = opts.days && message.at ? dayKey(message.at, opts) : '';
-    if (key && key !== lastDay()) html.push(renderDay(key, opts));
-    html.push(renderMessage(message, opts));
-    const frag = fragment(html.join(''));
-    const node = frag.lastElementChild;
-    list.insertBefore(frag, list.querySelector(':scope > .ct-typing, :scope > .ct-waiting'));
+    const day = key && key !== lastDay() ? fragment(renderDay(key, opts)).firstElementChild : null;
+    const node = fragment(renderMessage(message, opts)).firstElementChild;
+    const before = list.querySelector(':scope > .ct-typing, :scope > .ct-waiting');
+    if (day) list.insertBefore(day, before);
+    list.insertBefore(node, before);
     settle(node);
-    if (scroll && opts.autoScroll) node.scrollIntoView?.({ block: 'nearest' });
+    animateIn(day);
+    animateIn(node);
+    if (opts.autoScroll) node.scrollIntoView?.({ block: 'nearest' });
     return node;
   }
 
-  const nodeOf = (id) => [...list.querySelectorAll(':scope > .ct-msg[data-id]')].find((n) => n.dataset.id === String(id)) || null;
+  const nodeOf = (id) => [...list.querySelectorAll(':scope > .ct-msg[data-id]')].find((n) => sameId(n.dataset.id, id)) || null;
 
+  /** Draws one message again in place, keeping it open if it was, and the focus on the same button. */
   function redraw(id, message) {
     const node = nodeOf(id);
     if (!node) return null;
-    const frag = fragment(renderMessage(message, opts));
-    const fresh = frag.firstElementChild;
-    node.replaceWith(frag);
+    const open = node.querySelector(':scope > .ct-more')?.getAttribute('aria-expanded') === 'true';
+    const focused = node.contains(document.activeElement) ? document.activeElement.classList[0] : '';
+    const fresh = fragment(renderMessage(message, opts)).firstElementChild;
+    node.replaceWith(fresh);
     settle(fresh);
+    const more = fresh.querySelector(':scope > .ct-more');
+    if (open && more) setOpen(more, true, false);
+    if (focused?.startsWith('ct-')) fresh.querySelector(`.${focused}`)?.focus();
     return fresh;
   }
 
@@ -657,13 +932,23 @@ function createChat(el, options = {}) {
   function pruneDays() {
     for (const day of list.querySelectorAll(':scope > .ct-day')) {
       const next = day.nextElementSibling;
-      if (!next || next.classList.contains('ct-day') || next.classList.contains('ct-typing') || next.classList.contains('ct-waiting')) day.remove();
+      if (!next || next.matches('.ct-day, .ct-typing, .ct-waiting')) day.remove();
     }
   }
 
+  /** The day separator that would be left alone if `node` went. */
+  function orphanDay(node) {
+    const prev = node.previousElementSibling;
+    if (!prev?.classList.contains('ct-day')) return null;
+    const next = node.nextElementSibling;
+    return !next || next.matches('.ct-day, .ct-typing, .ct-waiting') ? prev : null;
+  }
+
+  const toggleBoxes = () => root.querySelectorAll('.ct-toggles input[type=checkbox][name]');
+
   function readToggles() {
     const values = {};
-    for (const box of root.querySelectorAll('.ct-toggles input[type=checkbox][name]')) values[box.name] = box.checked;
+    for (const box of toggleBoxes()) values[box.name] = box.checked;
     return values;
   }
 
@@ -675,6 +960,7 @@ function createChat(el, options = {}) {
     const draft = { from: 'me', text: value, at: opts.now().toISOString() };
     if (opts.sendState) draft.state = opts.sendState;
     if (Object.keys(toggles).length) draft.meta = { toggles };
+    // the box empties before anything is awaited, so a second Enter finds nothing to send
     if (fromBox) {
       input.value = '';
       grow();
@@ -688,52 +974,111 @@ function createChat(el, options = {}) {
       const answer = await given.onSend?.(value, { toggles, message: saved || draft, chat: api });
       if (!saved && answer && typeof answer === 'object') saved = answer;
     } catch (err) {
-      const failed = normalizeMessage({ ...temp, alert: true });
-      if (messages.includes(temp)) messages[messages.indexOf(temp)] = failed;
-      redraw(temp.id, failed);
+      settleDraft(temp, { ...temp, state: 'failed', alert: true });
       fail(err);
       return null;
     }
-    const final = normalizeMessage({ ...draft, ...(saved || {}), id: saved?.id ?? temp.id.replace('tmp-', 'local-') });
-    const index = messages.indexOf(temp);
-    if (index >= 0) messages[index] = final;
-    redraw(temp.id, final);
+    const final = settleDraft(temp, { ...draft, ...(saved || {}), id: saved?.id ?? temp.id.replace('tmp-', 'local-') });
     emit({ type: 'send', message: final, toggles });
     return final;
   }
 
+  /**
+   * The draft of a send becomes the saved message (or the failed one). If a live feed already
+   * appended the saved message while the store was answering, the draft just goes.
+   */
+  function settleDraft(temp, next) {
+    const message = normalizeMessage(next);
+    const index = messages.indexOf(temp);
+    if (!sameId(message.id, temp.id) && nodeOf(message.id)) {
+      if (index >= 0) messages.splice(index, 1);
+      nodeOf(temp.id)?.remove();
+      pruneDays();
+      upsert(message);
+    } else {
+      if (index >= 0) messages[index] = message;
+      redraw(temp.id, message);
+    }
+    return message;
+  }
+
+  /** Puts a message in the thread: in place when its id is already on screen, at the end otherwise. */
+  function upsert(message) {
+    const index = messages.findIndex((m) => sameId(m.id, message.id));
+    if (index >= 0) messages[index] = message;
+    else messages.push(message);   // new, or one the server drew and this script now knows
+    if (nodeOf(message.id)) redraw(message.id, message);
+    else insert(message);
+  }
+
   async function remove(node) {
     const id = node?.dataset.id;
-    if (id === undefined) return;
-    const index = messages.findIndex((m) => String(m.id) === id);
-    const message = index >= 0 ? messages[index] : { id };
+    if (id === undefined || removing.has(node)) return;
+    removing.add(node);
+    const known = messages.find((m) => sameId(m.id, id));
+    const message = known || { id };
     try {
       if (opts.store?.remove) await opts.store.remove(message.id);
       await given.onRemove?.(message);
     } catch (err) {
+      removing.delete(node);
       fail(err);
       return;
     }
-    if (index >= 0) messages.splice(messages.indexOf(message), 1);
-    node.remove();
-    pruneDays();
+    if (known && messages.includes(known)) messages.splice(messages.indexOf(known), 1);
+    const day = orphanDay(node);
+    const leaving = day ? [day, node] : [node];
+    // out of the thread's bookkeeping now; the nodes only finish their way out
+    for (const n of leaving) {
+      n.removeAttribute('data-id');
+      n.removeAttribute('data-day');
+      n.setAttribute('aria-hidden', 'true');
+    }
+    if (node.contains(document.activeElement)) input?.focus();
     emit({ type: 'remove', message });
+    await animateOut(leaving, parseFloat(getComputedStyle(list).rowGap) || 0);
+    pruneDays();
   }
 
-  function toggleMore(button) {
+  /** Opens or closes a long message. The height eases between the two; the fade stays on while it opens. */
+  function setOpen(button, open, animate = true) {
     const body = button.previousElementSibling;
-    const open = body.classList.toggle('ct-body--clamped') === false;
+    if (!body) return;
+    const from = body.getBoundingClientRect().height;
+    for (const run of body.getAnimations?.() ?? []) run.cancel();
     button.textContent = open ? opts.strings.less : opts.strings.more;
     button.setAttribute('aria-expanded', String(open));
+    const still = !animate || !body.animate || !motionAllowed();
+    if (open) {
+      if (still) {
+        body.classList.remove('ct-body--clamped');
+        return;
+      }
+      body.classList.add('ct-body--clamped');
+      const run = body.animate([{ maxHeight: `${from}px` }, { maxHeight: `${body.scrollHeight}px` }], { duration: 240, easing: EASE_OUT });
+      // the promise, not the finish event: it settles first, so the open state is there as soon as anyone looks
+      run.finished.then(() => body.classList.remove('ct-body--clamped'), () => {});
+      return;
+    }
+    body.classList.add('ct-body--clamped');
+    // closing can carry the button above the screen: bring it back, so the reader keeps the place
+    const keepInView = () => button.scrollIntoView?.({ block: 'nearest' });
+    if (still) {
+      keepInView();
+      return;
+    }
+    const run = body.animate([{ maxHeight: `${from}px` }, { maxHeight: `${body.getBoundingClientRect().height}px` }], { duration: 200, easing: EASE_OUT });
+    run.finished.then(keepInView, () => {});
   }
 
   async function copy(button) {
     const code = button.parentElement.querySelector('code');
-    const value = code?.textContent ?? '';
+    if (!code) return;
     try {
-      await navigator.clipboard.writeText(value);
+      await navigator.clipboard.writeText(code.textContent);
       button.textContent = opts.strings.copied;
-      later(() => { button.textContent = opts.strings.copy; }, 1200);
+      if (copied.has(button)) cancel(copied.get(button));
+      copied.set(button, later(() => { button.textContent = opts.strings.copy; }, 1200));
     } catch {
       // No clipboard (plain http, or permission refused): select the code so Ctrl+C works.
       const range = document.createRange();
@@ -746,11 +1091,15 @@ function createChat(el, options = {}) {
   function onClick(ev) {
     const button = ev.target.closest?.('button');
     if (!button || !root.contains(button)) return;
-    if (button.classList.contains('ct-send')) send();
-    else if (button.classList.contains('ct-more')) toggleMore(button);
-    else if (button.classList.contains('ct-copy')) copy(button);
-    else if (button.classList.contains('ct-remove')) remove(button.closest('.ct-msg'));
-    else if (button.classList.contains('ct-chip')) {
+    const is = (cls) => button.classList.contains(cls);
+    if (is('ct-send')) {
+      send();
+      // pressed from the keyboard, the button is now disabled: the focus goes back to the box
+      input?.focus();
+    } else if (is('ct-more')) setOpen(button, button.getAttribute('aria-expanded') !== 'true');
+    else if (is('ct-copy')) copy(button);
+    else if (is('ct-remove')) remove(button.closest('.ct-msg'));
+    else if (is('ct-chip')) {
       const value = button.dataset.text || button.textContent;
       if (button.hasAttribute('data-fill') && input) {
         input.value = value;
@@ -762,9 +1111,25 @@ function createChat(el, options = {}) {
     }
   }
 
+  /** A click on Send leaves the focus (and a phone's keyboard) in the box. */
+  function onMouseDown(ev) {
+    if (input && ev.target.closest?.('.ct-send')) ev.preventDefault();
+  }
+
+  function onComposition(ev) {
+    if (ev.target !== input) return;
+    if (composeEnd) cancel(composeEnd);
+    composeEnd = null;
+    if (ev.type === 'compositionstart') composing = true;
+    // Safari fires the Enter that picks a word after compositionend: it still belongs to the word
+    else composeEnd = later(() => { composing = false; composeEnd = null; }, 0);
+  }
+
   function onKeydown(ev) {
-    if (ev.target !== input || ev.key !== 'Enter' || ev.shiftKey || ev.isComposing || ev.keyCode === 229) return;
-    if (!opts.enterSends) return;
+    if (ev.target !== input || ev.key !== 'Enter' || ev.shiftKey) return;
+    if (composing || ev.isComposing || ev.keyCode === 229) return;
+    // with enterSends off, Ctrl+Enter (Cmd+Enter on a Mac) still sends
+    if (!opts.enterSends && !ev.ctrlKey && !ev.metaKey) return;
     ev.preventDefault();
     send();
   }
@@ -774,23 +1139,25 @@ function createChat(el, options = {}) {
   }
 
   const api = {
-    /** Adds a message at the end. A message from the other side clears typing and waiting. */
+    /**
+     * Adds a message at the end. A message from the other side clears typing and waiting.
+     * A message whose id is already in the thread (a live feed echoing a send) changes that one instead.
+     */
     append(message) {
       const m = normalizeMessage(message);
       if (m.id === null) m.id = `local-${++sequence}`;
-      messages.push(m);
       if (m.from !== 'me' && (typing || waiting)) {
         typing = false;
         waiting = false;
         drawIndicators();
       }
-      insert(m);
+      upsert(m);
       emit({ type: 'append', message: m });
       return m;
     },
     /** Changes one message in place, e.g. `{ state: 'read' }` or a streamed `{ text }`. */
     updateMessage(id, patch = {}) {
-      const index = messages.findIndex((m) => String(m.id) === String(id));
+      const index = messages.findIndex((m) => sameId(m.id, id));
       if (index < 0) return null;
       const m = normalizeMessage({ ...messages[index], ...patch, id: messages[index].id });
       messages[index] = m;
@@ -829,32 +1196,38 @@ function createChat(el, options = {}) {
     },
     /** Sends a text as if it had been typed in the box. */
     send: (value) => send(value),
-    /** New options; the text being typed is kept. */
+    /** New options. The text being typed, the toggles' boxes and the focus in the box are kept. */
     configure(next = {}) {
       const draft = input?.value ?? '';
-      given = { ...given, ...next };
+      const checked = readToggles();
+      const focused = !!input && document.activeElement === input;
+      given = mergeOptions(given, next);
       opts = resolveOptions(given);
       if (next.messages) messages = next.messages.map(normalizeMessage);
       unmount();
       mount(false);
+      if (!next.toggles) for (const box of toggleBoxes()) if (box.name in checked) box.checked = checked[box.name];
       if (input && draft) {
         input.value = draft;
         grow();
       }
+      if (focused) input?.focus();
     },
     focus() { input?.focus(); },
     get messages() { return messages.map((m) => ({ ...m })); },
     get el() { return root; },
-    get composer() { return root.querySelector('.ct-composer'); },
+    get composer() { return root?.querySelector('.ct-composer') ?? null; },
+    /** Takes the thread out of the page (only the thread: what else is in `el` stays). */
     destroy() {
       unmount();
       for (const t of timers) clearTimeout(t);
       timers.clear();
-      el.replaceChildren();
+      if (root === el) el.replaceChildren();
+      else root?.remove();
     },
   };
 
-  mount(given.hydrate === true);
+  mount(hydrating);
   return api;
 }
 
@@ -880,7 +1253,7 @@ function restStore(url, { headers = {}, fetch: doFetch = (...args) => globalThis
 }
 
 function listStore(read, write) {
-  const find = (data, id) => data.messages.findIndex((m) => String(m.id) === String(id));
+  const find = (data, id) => data.messages.findIndex((m) => sameId(m.id, id));
   return {
     load: () => ({ messages: read().messages }),
     send(draft) {

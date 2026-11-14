@@ -2,7 +2,7 @@
 
 A WhatsApp-style conversation thread for any app that talks: to a person, a group, an AI or a background job. My messages on the right with time and ticks, the other side on the left with its name, a safe markdown subset with copyable code, and a pill box that grows as you type.
 
-Vanilla JS, zero runtime dependencies, about 39 kB unminified. The HTML comes from a pure function, so a server draws the same thread the browser does. A SQLite store and an HTTP handler for Node come with it.
+Vanilla JS, zero runtime dependencies, about 56 kB unminified (19 kB gzipped). The HTML comes from a pure function, so a server draws the same thread the browser does. A SQLite store and an HTTP handler for Node come with it.
 
 ![A task thread: plan, a long answer behind "Read more", a queued message and the box](docs/thread.png)
 
@@ -15,9 +15,11 @@ Vanilla JS, zero runtime dependencies, about 39 kB unminified. The HTML comes fr
 - **Markdown for answers, plain text for me.** Headings, lists, code blocks with a **Copy** button, `code`, **bold**, *italic*, ~~strike~~, links. Raw HTML is never rendered, and what I typed stays exactly as I typed it.
 - **WhatsApp marks** (`*bold*`, `_italic_`, `~strike~`, ` ```mono``` `) for previews and logs of real WhatsApp messages.
 - **Long messages fold** behind "Read more", and unfold if they fit after all.
-- **Typing dots** and "… has not replied yet". A reply clears both.
+- **Typing dots** and "… has not replied yet". The dots look like the other side: in a bubble, or bare for a side that narrates in notes. A reply clears both.
 - **Day separators:** Today, Yesterday, the weekday, then the date, in your time zone and language.
-- **Queued and alert messages:** a message waiting for its turn is dashed with a clock and a × to take it back; an alert gets a red border.
+- **Queued, failed and alert messages:** a message waiting for its turn is dashed with a clock and a × to take it back; one that could not be sent gets a red border and a red mark ("Not sent"); an alert gets a red border.
+- **Quiet motion:** a new message fades in, a removed one folds away, "Read more" unrolls; short and eased, and none at all with `prefers-reduced-motion`.
+- **Accessible:** the thread is a log that announces new messages (not reloads), every button has a label, the focus stays in the box after sending, Ctrl+Enter sends when Enter does not, and every theme passes WCAG AA (the tests measure it).
 - **A box that behaves:** a pill that grows from one to six lines, Enter sends, Shift+Enter breaks the line, a round Send button that stays off while empty, suggestion chips above it and checkboxes below it.
 - **Notes without a bubble:** a bot or a system that narrates writes across the whole width with `kind: 'note'`, while the person's messages stay in bubbles.
 - **Three modes:** `chat`, `readonly` (a log, no box) and `preview` (what the other phone will show).
@@ -81,6 +83,8 @@ const html = renderThread(messages, { author: 'Assistant', timeZone: 'America/Sa
 createChat(container, { hydrate: true, onSend: (text) => post(text) });
 ```
 
+The thread carries its options in its markup (`data-options`: only the ones that differ from the defaults), so the browser draws new messages, times, day separators and every word the way the server did without being told again; options given to `createChat` win. The typing and waiting lines the server drew are taken over too, and a reply clears them. To change a server-drawn message with `updateMessage`, pass the same `messages` to `createChat`: the script cannot read them back from the HTML.
+
 ### A preview, no script at all
 
 ```js
@@ -104,24 +108,25 @@ el.innerHTML = renderThread([{ from: 'me', text: 'Hi, *Alex*! See you ~Wed~ _Thu
 | `copy` | `true` | The Copy button on code blocks. |
 | `chips` | `[]` | Suggestion chips: strings, or `{ label, text?, fill? }`. A chip sends its text; with `fill` it puts it in the box instead. |
 | `toggles` | `[]` | Checkboxes under the box: `{ name, label, checked? }`. Their values go with every message in `meta.toggles`. |
-| `enterSends` | `true` | Enter sends and Shift+Enter breaks the line. `false` leaves Enter alone. |
+| `enterSends` | `true` | Enter sends and Shift+Enter breaks the line. `false` leaves Enter alone (Ctrl+Enter or Cmd+Enter still sends). |
 | `sendState` | none | The state a new message starts with in the store, e.g. `'queued'` while the other side is busy. |
 | `autoScroll` | `true` | Bring a new message into view. |
 | `typing`, `waiting` | `false` | Start with the typing dots or the waiting line: `true` or a name. |
+| `typingKind` | `'auto'` | The shape of the typing dots: `bubble`, `note` (bare dots, no name, for a side that narrates) or `auto`, the shape of the other side's last message (a bubble when there is none). |
 | `strings` | English | Every visible word, e.g. `{ placeholder: 'Mensagem', send: 'Enviar', today: 'Hoje' }`. See `DEFAULT_STRINGS`. |
 | `locale` | browser | Language of the day separators and times. |
 | `timeZone` | browser | Time zone of the times and days, e.g. `'America/Sao_Paulo'` when rendering on a server. |
 | `hour12` | `false` | `5:50 PM` instead of `17:50`. |
-| `hydrate` | `false` | Take over a thread already in the element (from `renderThread`) instead of drawing it. |
-| `onSend` | none | `(text, { toggles, message, chat })` after a message is sent. Return a message object to replace the draft (its `id`, `state`...). Throw to mark it failed. |
+| `hydrate` | `false` | Take over a thread already in the element (from `renderThread`) instead of drawing it, with the options it was drawn with. |
+| `onSend` | none | `(text, { toggles, message, chat })` after a message is sent. Return a message object to replace the draft (its `id`, `state`...). Throw to mark it failed (`state: 'failed'`, a red mark labelled "Not sent"). |
 | `onRemove` | none | `(message)` when × takes back a queued message. |
 | `onChange` | none | Every `send`, `append`, `remove` and `load`. |
 | `onError` | `console.error` | Called when the store or a callback fails. The thread also fires a `chat-error` event. |
 | `now` | `() => new Date()` | The clock, for tests. |
 
-The returned chat has `append(message)`, `updateMessage(id, patch)`, `update({ messages?, typing?, waiting? })`, `setTyping(value)`, `setWaiting(value)`, `send(text)`, `reload()`, `configure(options)`, `focus()`, `messages`, `el`, `composer` and `destroy()`. A message from the other side passed to `append` clears the typing dots and the waiting line.
+The returned chat has `append(message)`, `updateMessage(id, patch)`, `update({ messages?, typing?, waiting? })`, `setTyping(value)`, `setWaiting(value)`, `send(text)`, `reload()`, `configure(options)`, `focus()`, `messages`, `el`, `composer` and `destroy()`. A message from the other side passed to `append` clears the typing dots and the waiting line. A message whose `id` is already in the thread changes that one instead of adding a copy, so a live feed that echoes what was just sent shows it once. `configure` keeps the text being typed, the toggles' boxes and the focus; its `strings` merge with the ones already given. `destroy` takes out the thread and nothing else in the element.
 
-`core.js` exports the pure pieces: `renderThread`, `renderList`, `renderMessage`, `renderComposer`, `renderMarkdown`, `renderWhatsApp`, `renderPlain`, `normalizeMessage`, `formatTime`, `dayKey`, `dayLabel`, `escapeHtml`, `safeUrl`, `linkify`, `DEFAULT_STRINGS`, `DEFAULTS`, `KINDS` and `LIMITS`.
+`core.js` exports the pure pieces: `renderThread`, `renderList`, `renderMessage`, `renderComposer`, `renderTyping`, `renderMarkdown`, `renderWhatsApp`, `renderPlain`, `normalizeMessage`, `formatTime`, `dayKey`, `dayLabel`, `escapeHtml`, `safeUrl`, `linkify`, `DEFAULT_STRINGS`, `DEFAULTS`, `KINDS`, `STATES` and `LIMITS`.
 
 ## Messages
 
@@ -133,7 +138,7 @@ The returned chat has `append(message)`, `updateMessage(id, patch)`, `update({ m
   author,      // the name on the left: 'Assistant', 'Session 2', 'Dana'
   text,        // up to 20,000 characters
   at,          // ISO time
-  state,       // my side: 'pending' | 'queued' | 'sent' | 'delivered' | 'read' (none counts as read)
+  state,       // my side: 'pending' | 'queued' | 'sent' | 'delivered' | 'read' (none counts as read) | 'failed'
   alert,       // true: red border
   tag,         // a small label before the text: 'waits for the session'
   title,       // a line above the text: 'Note of the day'
@@ -148,7 +153,7 @@ The returned chat has `append(message)`, `updateMessage(id, patch)`, `update({ m
 chat.append({ from: 'other', kind: 'note', text: 'Friday has **three** times open:\n- 10:30\n- 14:00' });
 ```
 
-A note is the other side telling what happens, the way a booking bot or a setup assistant talks: no bubble, no author line, no ticks, across the whole width in the theme's text color. It is markdown on either side, and Read more, Copy, `title`, `tag` and `alert` (a bar on the left) work as in a bubble. When the message has `at`, its time sits below the text in the muted color; `--ct-note-meta: none` hides it. `renderThread` draws the same note on a server. For a bot that only narrates, give its messages `kind: 'note'` in the app's mapping function and leave the person's as bubbles.
+A note is the other side telling what happens, the way a booking bot or a setup assistant talks: no bubble, no author line, no ticks, across the whole width in the theme's text color. It is markdown on either side, and Read more, Copy, `title`, `tag` and `alert` (a bar on the left) work as in a bubble. When the message has `at`, its time sits below the text in the muted color; `--ct-note-meta: none` hides it. `renderThread` draws the same note on a server. For a bot that only narrates, give its messages `kind: 'note'` in the app's mapping function and leave the person's as bubbles. While it writes, its typing dots are bare too, on the left with no bubble and no name: `typingKind: 'auto'` (the default) takes the shape of the other side's last message, and `typingKind: 'note'` asks for it before there is one.
 
 ## Themes
 
@@ -167,7 +172,7 @@ A note is the other side telling what happens, the way a booking bot or a setup 
 2. With no `data-theme` (or any other value), the system decides through `prefers-color-scheme`.
 3. Without a word for light from either, it stays dark.
 
-An app whose switch sets `data-theme` on `<html>` needs nothing more: the thread changes with the page, no script involved. An app that marks its theme some other way (a class, another attribute) can also set `data-theme`, or pass `theme: 'light'` or `'dark'` itself and call `chat.configure({ theme })` when its switch changes. Its own `--ct-*` properties on the container always win over `light` and `auto`.
+An app whose switch sets `data-theme` on `<html>` needs nothing more: the thread changes with the page, no script involved. The [live demo](https://rbritta.github.io/chat-thread/demo/) works this way: its System / Light / Dark switch at the top repaints every example. An app that marks its theme some other way (a class, another attribute) can also set `data-theme`, or pass `theme: 'light'` or `'dark'` itself and call `chat.configure({ theme })` when its switch changes. Its own `--ct-*` properties on the container always win over `light` and `auto`.
 
 ![Theme auto with the system light and with the system dark](docs/auto-light-dark.png)
 

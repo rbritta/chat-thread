@@ -42,6 +42,17 @@ export class NotFoundError extends Error {
   constructor(message) { super(message); this.name = 'NotFoundError'; this.status = 404; }
 }
 
+/** The meta column as an object; a value some other writer left unreadable comes back as null, not as an error for the whole thread. */
+function readMeta(text) {
+  if (!text) return null;
+  try {
+    const meta = JSON.parse(text);
+    return meta && typeof meta === 'object' && !Array.isArray(meta) ? meta : null;
+  } catch {
+    return null;
+  }
+}
+
 const fromRow = (r) => ({
   id: r.id,
   thread: r.thread,
@@ -54,7 +65,7 @@ const fromRow = (r) => ({
   state: r.state,
   alert: r.alert === 1,
   format: r.format,
-  meta: r.meta ? JSON.parse(r.meta) : null,
+  meta: readMeta(r.meta),
   at: r.at,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
@@ -135,7 +146,8 @@ export function createSqliteStore(db, { table = 'chat_messages', now = () => new
     const before = byId(thread, id);
     if (!before || (from && before.side !== from)) throw new NotFoundError('message not found');
     if (patch.removed === true) {
-      run(`UPDATE ${table} SET removed_at = ?, updated_at = ? WHERE id = ?`, now(), now(), before.id);
+      const stamp = now();
+      run(`UPDATE ${table} SET removed_at = ?, updated_at = ? WHERE id = ?`, stamp, stamp, before.id);
       const message = fromRow(before);
       onChange({ type: 'remove', thread, message });
       return { ok: true, id: before.id };

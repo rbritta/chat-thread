@@ -8,11 +8,17 @@
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="../src/chat-thread.css">
   <link rel="stylesheet" href="demo.css">
+  <script src="theme.js"></script>
 </head>
 <body>
   <header class="top">
-    <h1>chat-thread</h1>
-    <p>One conversation component in seven apps, dark or light: only the colors change. Type in any box with a Send button: Enter sends, Shift+Enter breaks the line. Everything here is made-up data, and this page runs under a strict Content Security Policy.</p>
+    <div class="top-row">
+      <h1>chat-thread</h1>
+      <div class="theme-switch" role="group" aria-label="Theme of the page">
+        <button type="button" data-scheme="system" aria-pressed="true">System</button><button type="button" data-scheme="light" aria-pressed="false">Light</button><button type="button" data-scheme="dark" aria-pressed="false">Dark</button>
+      </div>
+    </div>
+    <p>One conversation component in seven apps: only the colors change. The switch repaints every thread in light or dark, or lets your system decide; the threads use <code>theme: 'auto'</code> and follow it with CSS only. Type in any box with a Send button: Enter sends, Shift+Enter breaks the line. Everything here is made-up data, and this page runs under a strict Content Security Policy.</p>
     <nav aria-label="Sections">
       <a href="#task">Task thread</a>
       <a href="#session">Session console</a>
@@ -27,7 +33,7 @@
 
   <main class="grid">
     <section id="task" class="demo">
-      <h2>Task thread <small>dark · chat · toggles · queued · read more</small></h2>
+      <h2>Task thread <small>chat · toggles · queued · read more</small></h2>
       <p class="note">A dev dashboard: each task opens its conversation with a work session. A message sent while the session is busy waits in the queue, dashed, and can be removed.</p>
       <div class="frame frame--dash">
         <div class="frame-head">Projects · Sample project</div>
@@ -37,7 +43,7 @@
     </section>
 
     <section id="session" class="demo">
-      <h2>Session console <small>dark · code with Copy · queued</small></h2>
+      <h2>Session console <small>code with Copy · queued</small></h2>
       <p class="note">The same component on a greener background: an assistant answers with a code block, and the next message waits for it to finish.</p>
       <div class="frame frame--dev">
         <div class="frame-head">Sessions · mirror-service</div>
@@ -46,7 +52,7 @@
     </section>
 
     <section id="directions" class="demo demo--wide">
-      <h2>Directions for a generated text <small>dark · smaller type</small></h2>
+      <h2>Directions for a generated text <small>smaller type</small></h2>
       <p class="note">Short directions to an AI that rewrites the text on the right. The thread sits in a narrow column of a larger screen.</p>
       <div class="frame frame--dash">
         <div class="frame-head">Daily notes · Thursday</div>
@@ -58,7 +64,7 @@
     </section>
 
     <section id="reading" class="demo">
-      <h2>Reading companion <small>dark · title · read more · typing · chips</small></h2>
+      <h2>Reading companion <small>title · read more · typing · chips</small></h2>
       <p class="note">A reading app: the note of the day, a question about it and the answer on its way. The chips ask a ready-made question.</p>
       <div class="frame frame--reading">
         <div class="frame-head frame-head--center">Reading <span>· Today</span></div>
@@ -67,7 +73,7 @@
     </section>
 
     <section id="log" class="demo">
-      <h2>Read-only log <small>dark · readonly · group authors · rendered by renderThread()</small></h2>
+      <h2>Read-only log <small>readonly · group authors · rendered by renderThread()</small></h2>
       <p class="note">A message log viewer: no box, each author in a group gets a color. This thread is a string from <code>renderThread()</code>, the same call a server makes, hydrated afterwards.</p>
       <div class="frame frame--dash">
         <div class="frame-head">Log · Messages</div>
@@ -83,8 +89,8 @@
     </section>
 
     <section id="previews" class="demo demo--wide">
-      <h2>WhatsApp previews <small>light · preview · *bold* _italic_ ~strike~</small></h2>
-      <p class="note">A clinic messaging tool shows what the client's phone will show: the light WhatsApp look, with the tail, blue ticks and the formatting marks rendered. A scheduled message shows the clock.</p>
+      <h2>WhatsApp previews <small>whatsapp theme · preview · *bold* _italic_ ~strike~</small></h2>
+      <p class="note">A clinic messaging tool shows what the client's phone will show: the WhatsApp look, with the tail, blue ticks and the formatting marks rendered. A scheduled message shows the clock. These two keep <code>theme: 'whatsapp'</code> whatever the switch says, because they imitate the phone; the tool around them follows it.</p>
       <div class="previews">
         <div class="frame frame--dash">
           <div class="frame-head">Messages · Appointment reminder</div>
@@ -110,19 +116,15 @@
     </section>
 
     <section id="themes" class="demo demo--wide">
-      <h2>Light and auto <small>light · auto · notes with no bubble · chips · alert</small></h2>
-      <p class="note">A booking assistant in a light app: the assistant narrates in notes across the whole width, only the person's messages are bubbles. The second thread is <code>theme: 'auto'</code>: it follows the system, or <code>&lt;html data-theme&gt;</code> when the page sets it (the buttons do).</p>
+      <h2>Light and auto <small>notes with no bubble · typing as a note · chips · alert</small></h2>
+      <p class="note">A booking assistant narrates in notes across the whole width; only the person's messages are bubbles, and while it writes, its typing dots have no bubble either. This one is <code>theme: 'light'</code>, a light app that stays light whatever the switch says. The reminders beside it are <code>theme: 'auto'</code> like the rest of the page: the system decides, or <code>&lt;html data-theme&gt;</code> when the switch sets it.</p>
       <div class="themes">
         <div class="frame frame--light">
           <div class="frame-head">Bookings · Assistant</div>
           <div class="frame-body"><div data-thread="booking"></div></div>
         </div>
         <div class="frame frame--auto">
-          <div class="frame-head">Reminders · Assistant
-            <span class="scheme" role="group" aria-label="Theme of the page">
-              <button type="button" data-scheme="system" aria-pressed="true">System</button><button type="button" data-scheme="light" aria-pressed="false">Light</button><button type="button" data-scheme="dark" aria-pressed="false">Dark</button>
-            </span>
-          </div>
+          <div class="frame-head">Reminders · Assistant</div>
           <div class="frame-body"><div data-thread="reminders"></div></div>
         </div>
       </div>
@@ -134,7 +136,7 @@
   <script type="application/json" id="demo-data">
   {
     "task": {
-      "options": { "author": "Session 2", "clamp": 300, "strings": { "placeholder": "Message to Session 2" }, "toggles": [{ "name": "close", "label": "Close the session when done" }] },
+      "options": { "theme": "auto", "author": "Session 2", "clamp": 300, "strings": { "placeholder": "Message to Session 2" }, "toggles": [{ "name": "close", "label": "Close the session when done" }] },
       "reply": "Got it: I'll pick that up right after the current step.",
       "messages": [
         { "from": "me", "when": [0, "17:50"], "text": "We need to review everything we have, along with the HTML we generated, so we can start writing the user stories, with product, epic, etc" },
@@ -144,7 +146,7 @@
       ]
     },
     "session": {
-      "options": { "author": "Assistant", "strings": { "placeholder": "Message to the session" } },
+      "options": { "theme": "auto", "author": "Assistant", "strings": { "placeholder": "Message to the session" } },
       "reply": "Applied and rerun: 49 ok.",
       "messages": [
         { "from": "me", "when": [0, "16:40"], "text": "run the mirror tests and tell me what broke" },
@@ -153,7 +155,7 @@
       ]
     },
     "directions": {
-      "options": { "author": "AI", "days": false, "strings": { "placeholder": "Direction for the text" } },
+      "options": { "theme": "auto", "author": "AI", "days": false, "strings": { "placeholder": "Direction for the text" } },
       "reply": "Done: the release branch is named now.",
       "messages": [
         { "from": "me", "when": [0, "09:12"], "text": "shorter, drop the build details" },
@@ -161,7 +163,7 @@
       ]
     },
     "reading": {
-      "options": { "clamp": 200, "typing": true, "strings": { "placeholder": "Ask about the reading" }, "chips": ["Explain the passage", "Historical context", "How to apply it today"] },
+      "options": { "theme": "auto", "clamp": 200, "typing": true, "strings": { "placeholder": "Ask about the reading" }, "chips": ["Explain the passage", "Historical context", "How to apply it today"] },
       "reply": "It is the path that keeps the river whole: not the shortest one, the one it can follow without breaking.",
       "messages": [
         { "from": "other", "when": [0, "06:00"], "title": "Note of the day · Patience", "text": "The river does not hurry, and still it reaches the sea. Every bend that looks like a delay is the water finding the way that holds it.\n\nThe point is not that the bends go away: it is that the river keeps moving through them, one stretch at a time, and arrives.\n\nSo today, when something takes longer than planned, ask what it shows about the shape of the way before asking how to make it straight." },
@@ -169,7 +171,7 @@
       ]
     },
     "log": {
-      "options": { "mode": "readonly", "format": "whatsapp", "colorAuthors": true },
+      "options": { "theme": "auto", "mode": "readonly", "format": "whatsapp", "colorAuthors": true },
       "messages": [
         { "from": "other", "when": [3, "18:02"], "author": "Dana", "text": "anyone passing by the store? we're out of coffee" },
         { "from": "other", "when": [3, "18:05"], "author": "Kim", "text": "I'll go, home by 7" },

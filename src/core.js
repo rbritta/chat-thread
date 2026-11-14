@@ -8,7 +8,8 @@
  */
 
 export const LIMITS = Object.freeze({ text: 20000, author: 80, title: 200, tag: 120, url: 2048, id: 120, chip: 400, chips: 12, toggles: 8 });
-export const STATES = Object.freeze(['pending', 'queued', 'sent', 'delivered', 'read']);
+/** My messages: a clock while `pending` or `queued`, ticks for `sent`, `delivered` and `read`; `failed` when sending threw. */
+export const STATES = Object.freeze(['pending', 'queued', 'sent', 'delivered', 'read', 'failed']);
 export const FORMATS = Object.freeze(['markdown', 'whatsapp', 'plain']);
 export const MODES = Object.freeze(['chat', 'readonly', 'preview']);
 /** `bubble` is a message in a bubble; `note` is the other side narrating, full width, with no bubble. */
@@ -35,6 +36,7 @@ export const DEFAULT_STRINGS = Object.freeze({
   sent: 'Sent',
   delivered: 'Delivered',
   read: 'Read',
+  failed: 'Not sent',
   suggestions: 'Suggestions',
 });
 
@@ -51,6 +53,7 @@ export const DEFAULTS = Object.freeze({
   enterSends: true,
   autoScroll: true,
   sendState: null,
+  typingKind: 'auto',
   chips: Object.freeze([]),
   toggles: Object.freeze([]),
   locale: undefined,
@@ -60,7 +63,15 @@ export const DEFAULTS = Object.freeze({
 
 const RESOLVED = Symbol('chat-thread options');
 const NUL = '\u0000';
-const text = (v, max) => (v === null || v === undefined ? '' : String(v).slice(0, max));
+
+/** A value as text of at most `max` characters, never cutting an emoji (a surrogate pair) in half. */
+function clip(value, max) {
+  if (value === null || value === undefined) return '';
+  const s = String(value);
+  if (s.length <= max) return s;
+  const last = s.charCodeAt(max - 1);
+  return s.slice(0, last >= 0xd800 && last <= 0xdbff ? max - 1 : max);
+}
 
 /**
  * The options with every default filled in and bad values replaced: `mode` falls back to
@@ -71,13 +82,16 @@ export function resolveOptions(options = {}) {
   const given = options || {};
   const o = { ...DEFAULTS };
   for (const [k, v] of Object.entries(given)) if (v !== undefined) o[k] = v;
-  o.strings = { ...DEFAULT_STRINGS, ...(given.strings || {}) };
+  o.strings = { ...DEFAULT_STRINGS };
+  const strings = given.strings && typeof given.strings === 'object' ? given.strings : {};
+  for (const [k, v] of Object.entries(strings)) if (v !== undefined && v !== null) o.strings[k] = String(v);
   if (!MODES.includes(o.mode)) o.mode = 'chat';
   if (typeof o.theme !== 'string' || !/^[a-z][a-z0-9-]{0,31}$/.test(o.theme)) o.theme = 'dark';
   if (o.format !== 'auto' && !FORMATS.includes(o.format)) o.format = 'auto';
+  if (o.typingKind !== 'auto' && !KINDS.includes(o.typingKind)) o.typingKind = 'auto';
   o.clamp = Number.isFinite(Number(o.clamp)) ? Math.max(0, Number(o.clamp)) : DEFAULTS.clamp;
   if (o.days === null) o.days = o.mode !== 'preview';
-  o.author = text(o.author, LIMITS.author).trim();
+  o.author = clip(o.author, LIMITS.author).trim();
   o.chips = normalizeChips(o.chips);
   o.toggles = normalizeToggles(o.toggles);
   if (!STATES.includes(o.sendState)) o.sendState = null;
@@ -86,13 +100,17 @@ export function resolveOptions(options = {}) {
   return o;
 }
 
-/** Only http(s), relative (`/x`, `./x`, `../x`) and in-page links: never `javascript:` or `data:`. */
+/**
+ * Only http(s), relative (`/x`, `./x`, `../x`) and in-page links: never `javascript:` or `data:`.
+ * Whitespace, control characters and backslashes are refused too: a browser reads `/\host`
+ * as `//host`, which is another site.
+ */
 export function safeUrl(value) {
   if (typeof value !== 'string') return null;
   const url = value.trim();
-  if (!url || url.length > LIMITS.url) return null;
-  if (/^(\/(?!\/)|\.{1,2}\/|#|\?)/.test(url)) return /\s/.test(url) ? null : url;
-  return /^https?:\/\/[^\s]+$/i.test(url) ? url : null;
+  if (!url || url.length > LIMITS.url || /[\s\\\u0000-\u001f\u007f]/.test(url)) return null;
+  if (/^(\/(?!\/)|\.{1,2}\/|#|\?)/.test(url)) return url;
+  return /^https?:\/\/./i.test(url) ? url : null;
 }
 
 const ESCAPES = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
@@ -112,6 +130,7 @@ export function linkify(value) {
   let out = '';
   let last = 0;
   for (const match of raw.matchAll(URL_RE)) {
+    if (!safeUrl(match[0])) continue;
     out += escapeHtml(raw.slice(last, match.index)) + anchor(match[0], escapeHtml(match[0]));
     last = match.index + match[0].length;
   }
@@ -134,23 +153,42 @@ function stasher() {
   };
 }
 
+/** Bare URLs as links, kept away from the passes that follow. */
+const stashUrls = (s, keep) => s.replace(URL_RE, (url) => (safeUrl(url) ? keep(anchor(url, escapeHtml(url))) : url));
+
+/**
+ * Whether the emphasis tags in a piece of HTML close in the order they open. The marks are
+ * matched one kind at a time, so `**a *b** c*` would otherwise cross: `<strong>a <em>b</strong> c</em>`.
+ */
+function balanced(html) {
+  const open = [];
+  for (const [, closing, tag] of html.matchAll(/<(\/?)(strong|em|del)>/g)) {
+    if (!closing) open.push(tag);
+    else if (open.pop() !== tag) return false;
+  }
+  return open.length === 0;
+}
+
+/** A replacer for a mark regex with the groups (before, inner): wraps the inner text when that keeps the tags nested. */
+const wrapIn = (tag) => (whole, before, inner) => (balanced(inner) ? `${before}<${tag}>${inner}</${tag}>` : whole);
+
 function markdownEmphasis(s) {
   return s
-    .replace(/(\*\*|__)(?=\S)([^\n]*?\S)\1/g, '<strong>$2</strong>')
-    .replace(/(^|[^\w*])\*(?=[^\s*])([^\n*]*?[^\s*])\*(?![\w*])/g, '$1<em>$2</em>')
-    .replace(/(^|[^\w])_(?=[^\s_])([^\n_]*?[^\s_])_(?!\w)/g, '$1<em>$2</em>')
-    .replace(/~~(?=\S)([^\n]*?\S)~~/g, '<del>$1</del>');
+    .replace(/()(\*\*|__)(?=\S)([^\n]*?\S)\2/g, (whole, before, mark, inner) => wrapIn('strong')(whole, before, inner))
+    .replace(/(^|[^\w*])\*(?=[^\s*])([^\n*]*?[^\s*])\*(?![\w*])/g, wrapIn('em'))
+    .replace(/(^|[^\w])_(?=[^\s_])([^\n_]*?[^\s_])_(?!\w)/g, wrapIn('em'))
+    .replace(/()~~(?=\S)([^\n]*?\S)~~/g, wrapIn('del'));
 }
 
 /** One line of markdown: `code`, [links](url), bare URLs, **bold**, *italic*, ~~strike~~. */
 function markdownInline(line) {
   const { keep, restore } = stasher();
   let s = line.replace(/`([^`\n]+)`/g, (_, code) => keep(`<code>${escapeHtml(code)}</code>`));
-  s = s.replace(/\[([^\]\n]+)\]\(\s*([^)\s]+)\s*\)/g, (whole, label, url) => {
+  s = s.replace(/\[([^\]\n]{1,500})\]\(\s*([^)\s]+)\s*\)/g, (whole, label, url) => {
     const href = safeUrl(url);
     return href ? keep(anchor(href, markdownEmphasis(escapeHtml(label)))) : whole;
   });
-  s = s.replace(URL_RE, (url) => (safeUrl(url) ? keep(anchor(url, escapeHtml(url))) : url));
+  s = stashUrls(s, keep);
   return restore(markdownEmphasis(escapeHtml(s)));
 }
 
@@ -159,6 +197,9 @@ function codeBlock(code, lang, { copy, strings }) {
   const button = copy ? `<button type="button" class="ct-copy">${escapeHtml(strings.copy)}</button>` : '';
   return `<div class="ct-code"><pre><code${data}>${escapeHtml(code)}</code></pre>${button}</div>`;
 }
+
+// An opening fence: ``` or ~~~, a language, and anything after it (```js title="a.js").
+const FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*([\w#+.-]{0,30})[^`]*$/;
 
 /**
  * A safe subset of markdown, as chat answers use it: paragraphs (single newlines kept),
@@ -182,17 +223,19 @@ export function renderMarkdown(value, { copy = true, strings = DEFAULT_STRINGS }
   };
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const fence = /^ {0,3}(`{3,}|~{3,})\s*([\w#+.-]{0,30})\s*$/.exec(line);
+    const fence = FENCE.exec(line);
     if (fence) {
       flushPara();
       flushList();
+      const close = new RegExp(`^ {0,3}${fence[1][0] === '`' ? '`' : '~'}{${fence[1].length},}\\s*$`);
       const body = [];
-      while (++i < lines.length && !new RegExp(`^ {0,3}${fence[1][0] === '`' ? '`' : '~'}{${fence[1].length},}\\s*$`).test(lines[i])) body.push(lines[i]);
+      while (++i < lines.length && !close.test(lines[i])) body.push(lines[i]);
       out.push(codeBlock(body.join('\n'), fence[2], { copy, strings }));
       continue;
     }
     if (!line.trim()) { flushPara(); flushList(); continue; }
-    const heading = /^ {0,3}#{1,6}\s+(.+?)\s*#*\s*$/.exec(line);
+    // the closing #s need a space before them: "# C#" is about C#
+    const heading = /^ {0,3}#{1,6}\s+(.+?)(?:\s+#+)?\s*$/.exec(line);
     if (heading) {
       flushPara();
       flushList();
@@ -236,9 +279,8 @@ export function renderWhatsApp(value) {
   let s = clean(value);
   s = s.replace(/```([\s\S]+?)```/g, (_, code) => keep(`<code class="ct-mono">${escapeHtml(code)}</code>`));
   s = s.replace(/`([^`\n]+)`/g, (_, code) => keep(`<code>${escapeHtml(code)}</code>`));
-  s = s.replace(URL_RE, (url) => (safeUrl(url) ? keep(anchor(url, escapeHtml(url))) : url));
-  s = escapeHtml(s);
-  for (const [re, tag] of WHATSAPP_MARKS) s = s.replace(re, `$1<${tag}>$2</${tag}>`);
+  s = escapeHtml(stashUrls(s, keep));
+  for (const [re, tag] of WHATSAPP_MARKS) s = s.replace(re, wrapIn(tag));
   const html = s.split(/\n[ \t]*\n+/).filter((p) => p.trim()).map((p) => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
   return restore(html);
 }
@@ -266,15 +308,20 @@ const toDate = (at) => {
 export const normalizeAt = (at) => toDate(at)?.toISOString() ?? null;
 
 const formatters = new Map();
+/**
+ * A cached Intl.DateTimeFormat. A bad locale or a bad time zone falls back one at a time, so
+ * a typo in the locale still shows the times in the right zone.
+ */
 function formatter(locale, opts) {
   const key = JSON.stringify([locale ?? null, opts]);
   let f = formatters.get(key);
   if (!f) {
-    try {
-      f = new Intl.DateTimeFormat(locale, opts);
-    } catch {
-      const { timeZone: _ignored, ...rest } = opts;
-      f = new Intl.DateTimeFormat(undefined, rest);
+    const { timeZone: _zone, ...anyZone } = opts;
+    for (const [l, o] of [[locale, opts], [undefined, opts], [locale, anyZone], [undefined, anyZone]]) {
+      try {
+        f = new Intl.DateTimeFormat(l, o);
+        break;
+      } catch { /* try the next, simpler one */ }
     }
     formatters.set(key, f);
   }
@@ -298,6 +345,12 @@ export function formatTime(at, { locale, timeZone, hour12 = false } = {}) {
   return formatter(locale, opts).format(d);
 }
 
+function capitalize(label, locale) {
+  let first = label.charAt(0);
+  try { first = first.toLocaleUpperCase(locale); } catch { first = first.toUpperCase(); }
+  return first + label.slice(1);
+}
+
 /** The day separator: Today, Yesterday, the weekday within a week, then the date. */
 export function dayLabel(key, { now = new Date(), locale, timeZone, strings = DEFAULT_STRINGS } = {}) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(key || '')) return '';
@@ -309,7 +362,7 @@ export function dayLabel(key, { now = new Date(), locale, timeZone, strings = DE
   const label = diff > 1 && diff < 7
     ? formatter(locale, { timeZone: 'UTC', weekday: 'long' }).format(noon)
     : formatter(locale, { timeZone: 'UTC', day: 'numeric', month: 'short', ...(key.slice(0, 4) === today.slice(0, 4) ? {} : { year: 'numeric' }) }).format(noon);
-  return label.charAt(0).toLocaleUpperCase(locale) + label.slice(1);
+  return capitalize(label, locale);
 }
 
 /**
@@ -321,18 +374,18 @@ export function normalizeMessage(input) {
   const m = input && typeof input === 'object' ? input : {};
   let id = null;
   if (typeof m.id === 'number' && Number.isFinite(m.id)) id = m.id;
-  else if (m.id !== null && m.id !== undefined && m.id !== '') id = String(m.id).slice(0, LIMITS.id);
+  else if (m.id !== null && m.id !== undefined && m.id !== '') id = clip(m.id, LIMITS.id);
   return {
     id,
     from: m.from === 'me' ? 'me' : 'other',
     kind: KINDS.includes(m.kind) ? m.kind : 'bubble',
-    author: text(m.author, LIMITS.author).trim(),
-    text: text(m.text, LIMITS.text),
+    author: clip(m.author, LIMITS.author).trim(),
+    text: clip(m.text, LIMITS.text),
     at: normalizeAt(m.at),
     state: STATES.includes(m.state) ? m.state : null,
     alert: m.alert === true,
-    tag: text(m.tag, LIMITS.tag).trim(),
-    title: text(m.title, LIMITS.title).trim(),
+    tag: clip(m.tag, LIMITS.tag).trim(),
+    title: clip(m.title, LIMITS.title).trim(),
     format: FORMATS.includes(m.format) ? m.format : null,
     meta: m.meta && typeof m.meta === 'object' && !Array.isArray(m.meta) ? m.meta : null,
   };
@@ -343,7 +396,7 @@ export function normalizeChips(list) {
   if (!Array.isArray(list)) return [];
   return list
     .map((c) => (typeof c === 'string' ? { label: c } : c && typeof c === 'object' ? c : {}))
-    .map((c) => ({ label: text(c.label, LIMITS.chip).trim(), text: text(c.text ?? c.label, LIMITS.chip).trim(), fill: c.fill === true }))
+    .map((c) => ({ label: clip(c.label, LIMITS.chip).trim(), text: clip(c.text ?? c.label, LIMITS.chip).trim(), fill: c.fill === true }))
     .filter((c) => c.label && c.text)
     .slice(0, LIMITS.chips);
 }
@@ -353,7 +406,7 @@ export function normalizeToggles(list) {
   if (!Array.isArray(list)) return [];
   return list
     .filter((t) => t && typeof t === 'object' && /^[\w-]{1,40}$/.test(t.name || ''))
-    .map((t) => ({ name: t.name, label: text(t.label, LIMITS.chip).trim() || t.name, checked: t.checked === true }))
+    .map((t) => ({ name: t.name, label: clip(t.label, LIMITS.chip).trim() || t.name, checked: t.checked === true }))
     .slice(0, LIMITS.toggles);
 }
 
@@ -375,9 +428,10 @@ const TICK_PATH = 'M2 13l4 4 8-9M10 16l1 1 9-10';
 const icon = (cls, label, inner) => `<svg class="ct-tick${cls}" viewBox="0 0 24 24" role="img" aria-label="${escapeHtml(label)}">${inner}</svg>`;
 const SEND_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20.5l18-8.5L3 3.5v6.6l12 1.9-12 1.9z"/></svg>';
 
-/** Ticks of my message: clock while pending or queued, one tick sent, two delivered, two in color read. */
+/** Ticks of my message: clock while pending or queued, one tick sent, two delivered, two in color read, a red mark when it failed. */
 function ticks(state, strings) {
   if (state === 'pending' || state === 'queued') return icon(' ct-tick--clock', strings[state === 'queued' ? 'queued' : 'pending'], '<circle cx="12" cy="12" r="8"/><path d="M12 8v4l3 2"/>');
+  if (state === 'failed') return icon(' ct-tick--failed', strings.failed, '<circle cx="12" cy="12" r="8"/><path d="M12 7.5v5M12 16.2v.1"/>');
   if (state === 'sent') return icon('', strings.sent, '<path d="M5 13l4 4 10-11"/>');
   if (state === 'delivered') return icon('', strings.delivered, `<path d="${TICK_PATH}"/>`);
   return icon(' ct-tick--read', strings.read, `<path d="${TICK_PATH}"/>`);
@@ -385,6 +439,8 @@ function ticks(state, strings) {
 
 const intoLast = (html, extra) => (html.endsWith('</p>') ? `${html.slice(0, -4)}${extra}</p>` : null);
 const intoFirst = (html, extra) => (/^<p[^>]*>/.test(html) ? html.replace(/^<p[^>]*>/, (open) => open + extra) : `${extra}${html}`);
+const authorLabel = (name, o, attrs = '') =>
+  `<span class="ct-author${o.colorAuthors ? ` ct-author--${authorTone(name)}` : ''}"${attrs}>${escapeHtml(name)}</span>`;
 
 /**
  * One message. `options` are the thread's (see `DEFAULTS`). A `note` has no bubble, no
@@ -402,7 +458,7 @@ export function renderMessage(input, options) {
   if (m.alert) classes.push('ct-msg--alert');
 
   const name = mine || note ? '' : m.author || o.author;
-  const author = name ? `<span class="ct-author${o.colorAuthors ? ` ct-author--${authorTone(name)}` : ''}">${escapeHtml(name)}</span>` : '';
+  const author = name ? authorLabel(name, o) : '';
   const title = m.title ? `<p class="ct-title">${escapeHtml(m.title)}</p>` : '';
 
   let body = formatText(m.text, format, { copy: o.copy, strings: s });
@@ -432,20 +488,40 @@ export function renderDay(key, options) {
   return `<div class="ct-day" data-day="${escapeHtml(key)}">${escapeHtml(dayLabel(key, { now: o.now(), locale: o.locale, timeZone: o.timeZone, strings: o.strings }))}</div>`;
 }
 
-/** Three bouncing dots on the other side. `author` is shown above them when given. */
-export function renderTyping(author, options) {
+/**
+ * Three bouncing dots on the other side. `author` is `true` (the thread's author) or a name.
+ * `kind` is the shape: `bubble`, with the name above the dots, or `note`, bare dots on the
+ * left for a side that narrates. The words ("Assistant is typing") are there for screen
+ * readers only; the thread's log announces them.
+ */
+export function renderTyping(author, options, kind = 'bubble') {
   const o = resolveOptions(options);
-  const name = text(author === true ? o.author : author, LIMITS.author).trim();
+  const name = clip(author === true ? o.author : author, LIMITS.author).trim();
   const label = name ? fill(o.strings.typing, { author: name }) : o.strings.typingNoAuthor;
-  const tag = name ? `<span class="ct-author${o.colorAuthors ? ` ct-author--${authorTone(name)}` : ''}">${escapeHtml(name)}</span>` : '';
-  return `<div class="ct-msg ct-msg--theirs ct-typing" role="status" aria-label="${escapeHtml(label)}">${tag}<span class="ct-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>`;
+  const note = kind === 'note';
+  const tag = name && !note ? authorLabel(name, o, ' aria-hidden="true"') : '';
+  const data = name ? ` data-author="${escapeHtml(name)}"` : '';
+  return `<div class="ct-msg ${note ? 'ct-msg--note' : 'ct-msg--theirs'} ct-typing"${data}>${tag}<span class="ct-sr">${escapeHtml(label)}</span><span class="ct-dots" aria-hidden="true"><i></i><i></i><i></i></span></div>`;
 }
 
 /** "Assistant has not replied yet…", in muted italics on the other side. */
 export function renderWaiting(author, options) {
   const o = resolveOptions(options);
-  const name = text(author === true ? o.author : author, LIMITS.author).trim();
-  return `<div class="ct-waiting" role="status">${escapeHtml(name ? fill(o.strings.waiting, { author: name }) : o.strings.waitingNoAuthor)}</div>`;
+  const name = clip(author === true ? o.author : author, LIMITS.author).trim();
+  const data = name ? ` data-author="${escapeHtml(name)}"` : '';
+  return `<div class="ct-waiting"${data}>${escapeHtml(name ? fill(o.strings.waiting, { author: name }) : o.strings.waitingNoAuthor)}</div>`;
+}
+
+/**
+ * The shape of the typing dots under `typingKind: 'auto'`: the shape of the last message that
+ * is not a bubble of mine. A side that narrates in notes types as a note.
+ */
+function typingKindOf(messages, o) {
+  if (o.typingKind !== 'auto') return o.typingKind;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i].kind === 'note' || messages[i].from !== 'me') return messages[i].kind;
+  }
+  return 'bubble';
 }
 
 /**
@@ -454,10 +530,10 @@ export function renderWaiting(author, options) {
  */
 export function renderList(messages = [], options = {}, state = {}) {
   const o = resolveOptions(options);
+  const list = (Array.isArray(messages) ? messages : []).map(normalizeMessage);
   const parts = [];
   let last = '';
-  for (const raw of Array.isArray(messages) ? messages : []) {
-    const m = normalizeMessage(raw);
+  for (const m of list) {
     const key = o.days && m.at ? dayKey(m.at, o) : '';
     if (key && key !== last) {
       parts.push(renderDay(key, o));
@@ -465,7 +541,7 @@ export function renderList(messages = [], options = {}, state = {}) {
     }
     parts.push(renderMessage(m, o));
   }
-  if (state.typing) parts.push(renderTyping(state.typing, o));
+  if (state.typing) parts.push(renderTyping(state.typing, o, typingKindOf(list, o)));
   if (state.waiting) parts.push(renderWaiting(state.waiting, o));
   return parts.join('');
 }
@@ -481,7 +557,27 @@ export function renderComposer(options) {
   const toggles = o.toggles.length
     ? `<div class="ct-toggles">${o.toggles.map((t) => `<label><input type="checkbox" name="${escapeHtml(t.name)}"${t.checked ? ' checked' : ''}> ${escapeHtml(t.label)}</label>`).join('')}</div>`
     : '';
-  return `<div class="ct-composer">${chips}<div class="ct-row"><div class="ct-field"><textarea class="ct-input" rows="1" maxlength="${LIMITS.text}" placeholder="${escapeHtml(s.placeholder)}" aria-label="${escapeHtml(s.placeholder)}"></textarea></div><button type="button" class="ct-send" disabled aria-label="${escapeHtml(s.send)}" title="${escapeHtml(s.send)}">${SEND_ICON}</button></div>${toggles}</div>`;
+  // enterkeyhint: a phone's keyboard labels its Enter key "send" when Enter sends
+  return `<div class="ct-composer">${chips}<div class="ct-row"><div class="ct-field"><textarea class="ct-input" rows="1" maxlength="${LIMITS.text}" enterkeyhint="${o.enterSends ? 'send' : 'enter'}" placeholder="${escapeHtml(s.placeholder)}" aria-label="${escapeHtml(s.placeholder)}"></textarea></div><button type="button" class="ct-send" disabled aria-label="${escapeHtml(s.send)}" title="${escapeHtml(s.send)}">${SEND_ICON}</button></div>${toggles}</div>`;
+}
+
+// The options a browser needs to go on drawing a server-rendered thread the same way.
+const CARRIED = ['theme', 'format', 'author', 'colorAuthors', 'ticks', 'clamp', 'copy', 'enterSends', 'sendState', 'typingKind', 'locale', 'timeZone', 'hour12'];
+
+/**
+ * The options that differ from the defaults, for the thread's `data-options`: with them,
+ * `createChat(el, { hydrate: true })` draws new messages, times, day separators and every
+ * word the way the server did, without the page passing them again.
+ */
+function carriedOptions(o) {
+  const out = {};
+  for (const key of CARRIED) if (o[key] !== undefined && o[key] !== DEFAULTS[key]) out[key] = o[key];
+  if (o.days !== (o.mode !== 'preview')) out.days = o.days;
+  if (o.chips.length) out.chips = o.chips;
+  if (o.toggles.length) out.toggles = o.toggles;
+  const strings = Object.fromEntries(Object.entries(o.strings).filter(([k, v]) => v !== DEFAULT_STRINGS[k]));
+  if (Object.keys(strings).length) out.strings = strings;
+  return Object.keys(out).length ? JSON.stringify(out) : '';
 }
 
 /**
@@ -493,5 +589,7 @@ export function renderThread(messages = [], options = {}, state = {}) {
   const classes = ['ct'];
   if (o.theme !== 'dark') classes.push(`ct--${o.theme}`);
   if (o.mode !== 'chat') classes.push(`ct--${o.mode}`);
-  return `<div class="${classes.join(' ')}" data-mode="${o.mode}"><div class="ct-list" role="log" aria-label="${escapeHtml(o.strings.thread)}">${renderList(messages, o, state)}</div>${o.mode === 'chat' ? renderComposer(o) : ''}</div>`;
+  const carried = carriedOptions(o);
+  const data = carried ? ` data-options="${escapeHtml(carried)}"` : '';
+  return `<div class="${classes.join(' ')}" data-mode="${o.mode}"${data}><div class="ct-list" role="log" aria-label="${escapeHtml(o.strings.thread)}">${renderList(messages, o, state)}</div>${o.mode === 'chat' ? renderComposer(o) : ''}</div>`;
 }

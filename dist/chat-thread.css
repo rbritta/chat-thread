@@ -7,7 +7,7 @@
   --ct-theirs: #1a1f26;
   --ct-theirs-border: #262d37;
   --ct-text: #e6edf3;
-  --ct-muted: #8b949e;
+  --ct-muted: #98a1ab;
   --ct-tick: #7fb8a6;
   --ct-link: #58a6ff;
   --ct-hover: #6e7681;
@@ -21,7 +21,7 @@
   --ct-title: #6fbf9f;
   --ct-field: #141920;
   --ct-field-border: #2a323d;
-  --ct-focus: #3c6f62;
+  --ct-focus: #4f8f7e;
   --ct-send: #2f6f5e;
   --ct-send-icon: #e6f3ee;
   --ct-alert: #f85149;
@@ -48,6 +48,15 @@
   color-scheme: dark;
 }
 .ct *, .ct *::before, .ct *::after { box-sizing: border-box; }
+/* words for screen readers only ("Assistant is typing") */
+.ct-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 
 .ct-list { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 
@@ -84,7 +93,7 @@
   border: 1px solid var(--ct-theirs-border);
   border-top-left-radius: 3px;
 }
-.ct-msg--queued { border-style: dashed; opacity: .85; }
+.ct-msg--queued { border-style: dashed; }
 .ct-msg--alert { border-color: var(--ct-alert); }
 
 /* a note: the other side narrating across the whole width, with no bubble */
@@ -97,6 +106,7 @@
 }
 .ct-msg--note.ct-msg--alert { padding-left: 10px; border-left: 3px solid var(--ct-alert); }
 .ct-msg--note > .ct-meta { display: var(--ct-note-meta); float: none; margin: 3px 0 0; }
+.ct-msg--note > .ct-more + .ct-meta { margin-left: 12px; }
 
 .ct-author { display: block; margin-bottom: 1px; color: var(--ct-author); font-size: 12.5px; font-weight: 650; }
 .ct-author--1 { color: var(--ct-author-1); }
@@ -161,6 +171,7 @@
 }
 .ct-tick { width: 15px; height: 15px; fill: none; stroke: var(--ct-muted); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
 .ct-tick--read { stroke: var(--ct-tick); }
+.ct-tick--failed { stroke: var(--ct-alert); }
 .ct-remove { padding: 0 0 0 6px; border: 0; background: none; color: var(--ct-muted); font: inherit; font-size: 14px; line-height: 1; cursor: pointer; }
 .ct-remove:hover { color: var(--ct-alert); }
 .ct-tag { margin-right: 4px; color: var(--ct-muted); font-size: 11px; }
@@ -194,8 +205,12 @@
   0%, 60%, 100% { opacity: .3; transform: none; }
   30% { opacity: 1; transform: translateY(-3px); }
 }
+/* a side that narrates in notes types as a note: bare dots on the left, no bubble */
+.ct-msg--note.ct-typing .ct-dots { padding: 6px 0 4px; }
 @media (prefers-reduced-motion: reduce) {
   .ct-dots i { animation: none; opacity: .6; }
+  .ct-send { transition: opacity .15s; }
+  .ct-send:disabled { transform: none; }
 }
 .ct-waiting { align-self: flex-start; padding: 2px 4px; color: var(--ct-muted); font-size: 13px; font-style: italic; }
 
@@ -242,7 +257,7 @@
   line-height: 1.45;
   resize: none;
 }
-.ct-input::placeholder { color: var(--ct-muted); opacity: .8; }
+.ct-input::placeholder { color: var(--ct-muted); opacity: 1; }
 .ct-send {
   display: grid;
   flex: none;
@@ -262,21 +277,24 @@
 .ct-toggles label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .ct button:focus-visible, .ct-toggles input:focus-visible { outline: 2px solid var(--ct-focus); outline-offset: 2px; }
 
-/* the light WhatsApp look: for previews of what the other phone will show */
+/* the light WhatsApp look: for previews of what the other phone will show. Its muted text,
+   links and focus are a shade darker than WhatsApp's own, to pass WCAG AA on the bubbles and on
+   the WhatsApp wallpaper (#efeae2); the blue of the read ticks is WhatsApp's (the state is also
+   in the ticks' label). */
 .ct--whatsapp {
   --ct-mine: #d9fdd3;
   --ct-mine-border: #d9fdd3;
   --ct-theirs: #ffffff;
   --ct-theirs-border: #ffffff;
   --ct-text: #111b21;
-  --ct-muted: #667781;
+  --ct-muted: #5b6a73;
   --ct-tick: #53bdeb;
-  --ct-link: #027eb5;
+  --ct-link: #026f9f;
   --ct-author: #1f7aad;
   --ct-title: #111b21;
   --ct-field: #ffffff;
   --ct-field-border: #ffffff;
-  --ct-focus: #d1d7db;
+  --ct-focus: #008069;
   --ct-send: #00a884;
   --ct-send-icon: #ffffff;
   --ct-day: #ffffffcc;

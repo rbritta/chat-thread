@@ -34,21 +34,14 @@ function live(name) {
 const chats = Object.fromEntries(['task', 'session', 'directions', 'reading', 'booking', 'reminders'].map((name) => [name, live(name)]));
 
 // Read-only, as a server would send it: a string from renderThread(), then hydrated for "Read more" and Copy.
+// The options travel in the markup (data-options), so hydrating needs none of them again.
 const log = slot('log');
 log.innerHTML = renderThread(messagesOf('log'), data.log.options);
-chats.log = createChat(log, { ...data.log.options, hydrate: true });
+chats.log = createChat(log, { hydrate: true });
 
 // Previews are plain strings: no script needed to show them.
 for (const name of ['reminder', 'scheduled']) slot(name).innerHTML = renderThread(messagesOf(name), data[name].options);
 
-// Theme auto follows <html data-theme>: Light and Dark set it, System removes it.
-const schemes = document.querySelectorAll('[data-scheme]');
-for (const button of schemes) {
-  button.addEventListener('click', () => {
-    if (button.dataset.scheme === 'system') delete document.documentElement.dataset.theme;
-    else document.documentElement.dataset.theme = button.dataset.scheme;
-    for (const other of schemes) other.setAttribute('aria-pressed', String(other === button));
-  });
-}
+// The theme switch at the top is theme.js: the threads with theme 'auto' follow it with CSS only.
 
 window.demoChats = chats;

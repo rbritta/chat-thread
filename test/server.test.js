@@ -171,3 +171,19 @@ test('a body some framework already read is used as is', async () => {
   const res = fakeRes();
   assert.equal(await handle({ method: 'GET', url: '/somewhere-else' }, res), false);
 });
+
+test('failed is a state the server may set, never the browser; an unreadable meta does not break the thread', async () => {
+  const db = new DatabaseSync(':memory:');
+  const store = createSqliteStore(db, { now: clock() });
+  const m = store.add('t', { from: 'me', text: 'hello' });
+  assert.equal(store.update('t', m.id, { state: 'failed' }).state, 'failed');
+  db.prepare('UPDATE chat_messages SET meta = ? WHERE id = ?').run('{not json', m.id);
+  assert.equal(store.load('t').messages[0].meta, null);
+  const removed = store.remove('t', m.id);
+  const row = db.prepare('SELECT removed_at, updated_at FROM chat_messages WHERE id = ?').get(removed.id);
+  assert.equal(row.removed_at, row.updated_at, 'one moment for both');
+  await withServer(async ({ base }) => {
+    const res = await fetch(`${base}/api/chat/t`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ text: 'x', state: 'failed' }) });
+    assert.equal(res.status, 400);
+  });
+});

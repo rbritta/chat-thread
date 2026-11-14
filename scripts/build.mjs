@@ -12,6 +12,12 @@ const chat = await readFile(`${root}src/chat-thread.js`, 'utf8');
 const names = (src) => [...src.matchAll(/^export (?:const|function|class|async function) (\w+)/gm)].map((m) => m[1]);
 const all = [...names(chat), ...names(core)];
 
+// Both files share one scope in the bundle: a top-level name in both would shadow the other
+// one silently (a function) or break the script (a const). Refuse to build instead.
+const declared = (src) => [...src.matchAll(/^(?:export )?(?:const|let|var|function|class|async function) (\w+)/gm)].map((m) => m[1]);
+const clash = declared(chat).filter((name) => declared(core).includes(name));
+if (clash.length) throw new Error(`src/core.js and src/chat-thread.js both declare: ${clash.join(', ')}`);
+
 const strip = (src) => src.split(String.fromCharCode(13)).join('')
   .replace(/^import[\s\S]*?from '[^']+';\n/gm, '')
   .replace(/^export \* from '[^']+';\n/gm, '')
