@@ -219,3 +219,20 @@ test('threads fit a phone and a light page', async (t) => {
     await ctx.close();
   }
 });
+
+test('threads a page adds after createThreads get the box', async (t) => {
+  if (!browser) return t.skip('no browser');
+  const { p, ctx, errors } = await page();
+  const r = await p.evaluate(async () => {
+    const { createThreads } = await import('/src/chat-thread.js');
+    const host = document.createElement('div');
+    document.body.append(host);
+    const box = createThreads(host, { mode: 'questions' });
+    const before = host.querySelector('.ct-th-new').hidden;
+    box.upsert({ id: 'q1', n: 1, title: 'Fetched later', status: 'open', tone: 'wait', messages: [{ from: 'other', text: 'Hi' }] });
+    return { before, active: box.active, fresh: host.querySelector('.ct-th-new').hidden };
+  });
+  assert.deepEqual(r, { before: false, active: 'q1', fresh: true });
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});

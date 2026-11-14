@@ -40,6 +40,7 @@ export const THREAD_STRINGS = Object.freeze({
   untitled: 'Untitled',
   titledBy: 'Title by {name}',
   showResolved: 'Show {count} resolved',
+  showResolvedOne: 'Show 1 resolved',
   hideResolved: 'Hide resolved',
   newThread: 'Write to start a new thread',
   branch: 'Start another thread with this text',
@@ -162,7 +163,7 @@ export function createThreads(el, options = {}) {
   function count() {
     const k = [...items.values()].filter((x) => x.t.status === 'resolved').length;
     more.hidden = !k;
-    more.textContent = el.classList.contains('ct-threads--hide-resolved') ? fill(s.showResolved, { count: k }) : s.hideResolved;
+    more.textContent = el.classList.contains('ct-threads--hide-resolved') ? fill(k === 1 ? s.showResolvedOne : s.showResolved, { count: k }) : s.hideResolved;
   }
 
   /** One message box: the active thread's; with none open, the one at the bottom. */
@@ -403,7 +404,12 @@ export function createThreads(el, options = {}) {
     /** Adds a thread, or changes the fields given of one already there (its messages: `update`). */
     upsert(patch) {
       const x = items.get(patch.id);
-      if (!x) return add(patch, patch.open ?? (patch.status !== 'resolved' && patch.tone !== 'idle')) && undefined;
+      if (!x) {
+        const y = add(patch, patch.open ?? (patch.status !== 'resolved' && patch.tone !== 'idle'));
+        // the first thread open gets the box (threads added after createThreads, as a page that fetches them does)
+        if (y.open && !active) activate(y);
+        return undefined;
+      }
       const { messages, ...rest } = patch;
       Object.assign(x.t, rest);
       if (messages) {
