@@ -1,24 +1,17 @@
 // The thread in a real browser (installed Chrome or Edge, through playwright-core, headless).
-// Skipped when no browser is found: set PW_CHANNEL=msedge or PW_EXECUTABLE=/path to pick one.
+// test/browser.js finds the browser, pins the language and time zone, and says why when it skips.
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { serve } from '../scripts/serve-demo.mjs';
+import { launch, newContext } from './browser.js';
 
-let chromium;
 let browser;
+let skip;
 let server;
 let base;
 
 before(async () => {
-  try {
-    ({ chromium } = await import('playwright-core'));
-    browser = await chromium.launch({
-      headless: true,
-      ...(process.env.PW_EXECUTABLE ? { executablePath: process.env.PW_EXECUTABLE } : { channel: process.env.PW_CHANNEL || 'chrome' }),
-    });
-  } catch {
-    browser = null;
-  }
+  ({ browser, skip } = await launch());
   server = await serve(0);
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -30,7 +23,7 @@ after(async () => {
 
 // Motion is reduced unless a test asks for it, so what a test reads right after a click is final.
 async function page(width = 1200, height = 900, { colorScheme = 'dark', reducedMotion = 'reduce' } = {}) {
-  const ctx = await browser.newContext({ viewport: { width, height }, colorScheme, reducedMotion });
+  const ctx = await newContext(browser, { viewport: { width, height }, colorScheme, reducedMotion });
   // every CSP violation lands in the errors, even one the console would not show
   await ctx.addInitScript(() => document.addEventListener('securitypolicyviolation', (e) => console.error(`CSP: ${e.violatedDirective} ${e.blockedURI}`)));
   const p = await ctx.newPage();
@@ -45,7 +38,7 @@ async function page(width = 1200, height = 900, { colorScheme = 'dark', reducedM
 const thread = (name) => `[data-thread="${name}"]`;
 
 test('the demo renders every mode with no errors and no CSP violations', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx, errors } = await page();
   const count = (sel) => p.locator(sel).count();
   assert.equal(await count(`${thread('task')} .ct-msg`), 4);
@@ -74,7 +67,7 @@ test('the demo renders every mode with no errors and no CSP violations', async (
 });
 
 test('the box: disabled when empty, Shift+Enter breaks the line, Enter sends, the reply arrives', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx, errors } = await page();
   const box = p.locator(`${thread('directions')} .ct-input`);
   const send = p.locator(`${thread('directions')} .ct-send`);
@@ -100,7 +93,7 @@ test('the box: disabled when empty, Shift+Enter breaks the line, Enter sends, th
 });
 
 test('the box grows to six lines, then scrolls', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx } = await page();
   const box = p.locator(`${thread('session')} .ct-input`);
   await box.fill(Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join('\n'));
@@ -113,7 +106,7 @@ test('the box grows to six lines, then scrolls', async (t) => {
 });
 
 test('read more opens and closes a long message; short ones lose the button', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx } = await page();
   const long = p.locator(`${thread('task')} .ct-msg`, { has: p.locator('.ct-more') });
   assert.equal(await long.count(), 1);
@@ -130,7 +123,7 @@ test('read more opens and closes a long message; short ones lose the button', as
 });
 
 test('Copy puts the code on the clipboard', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx } = await page();
   await ctx.grantPermissions(['clipboard-read', 'clipboard-write'], { origin: base });
   const button = p.locator(`${thread('session')} .ct-copy`);
@@ -143,7 +136,7 @@ test('Copy puts the code on the clipboard', async (t) => {
 });
 
 test('× removes a queued message from the thread and the store; toggles and chips go with what is sent', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx, errors } = await page();
   await p.click(`${thread('session')} .ct-remove`);
   assert.equal(await p.locator(`${thread('session')} .ct-msg--queued`).count(), 0);
@@ -162,7 +155,7 @@ test('× removes a queued message from the thread and the store; toggles and chi
 });
 
 test('WhatsApp previews: marks rendered, tail drawn, blue ticks, clock when scheduled', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx } = await page();
   const reminder = p.locator(`${thread('reminder')} .ct-msg`);
   assert.equal(await reminder.locator('strong').textContent(), 'Thursday, Nov 14 at 9:30 AM');
@@ -176,7 +169,7 @@ test('WhatsApp previews: marks rendered, tail drawn, blue ticks, clock when sche
 });
 
 test('links have no underline and turn gray on hover', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx } = await page();
   const link = p.locator(`${thread('task')} .ct-body a`).first();
   assert.equal(await link.evaluate((el) => getComputedStyle(el).textDecorationLine), 'none');
@@ -197,7 +190,7 @@ function contrastIn(page, pairs) {
 }
 
 test('light: its palette, text that passes AA on both bubbles and on the page, a dark page around it changes nothing', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx, errors } = await page();
   const found = await p.evaluate(() => {
     const ct = document.querySelector('[data-thread="booking"] .ct');
@@ -250,7 +243,7 @@ test('light: its palette, text that passes AA on both bubbles and on the page, a
 });
 
 test('auto: dark by default, light when the system is light, and <html data-theme> wins over the system', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx, errors } = await page(1200, 900, { colorScheme: 'light' });
   const LIGHT = 'rgb(227, 249, 232) rgb(31, 35, 40)';
   const DARK = 'rgb(31, 59, 52) rgb(230, 237, 243)';
@@ -300,7 +293,7 @@ test('auto: dark by default, light when the system is light, and <html data-them
 });
 
 test('a note: no bubble, the whole width, the theme\'s text, markdown, a quiet time below; replies arrive as notes', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx, errors } = await page();
   const note = p.locator(`${thread('booking')} .ct-msg--note`).last();
   const box = await note.evaluate((el) => {
@@ -364,7 +357,7 @@ test('a note: no bubble, the whole width, the theme\'s text, markdown, a quiet t
 });
 
 test('the API: hydrate, waiting, a failed send, update and destroy', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx } = await page();
   const result = await p.evaluate(async () => {
     const { createChat, renderThread } = await import('/src/chat-thread.js');
@@ -429,7 +422,7 @@ const installSandbox = (p) => p.evaluate(() => {
 });
 
 test('hydrating a server-rendered thread the way an app does: the server\'s options, toggles, a reply that clears waiting, ×, a failure', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx, errors } = await page();
   // what the server does: renderThread with its options and the waiting line; the page passes only callbacks
   await p.evaluate(async () => {
@@ -502,7 +495,7 @@ test('hydrating a server-rendered thread the way an app does: the server\'s opti
 });
 
 test('rapid sends: a double Enter or a double click sends once; a double × removes once', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx, errors } = await page();
   const box = p.locator(`${thread('directions')} .ct-input`);
   const mine = (text) => p.locator(`${thread('directions')} .ct-msg--mine`, { hasText: text }).count();
@@ -535,7 +528,7 @@ test('rapid sends: a double Enter or a double click sends once; a double × remo
 });
 
 test('IME: the Enter that picks a word never sends, in Chrome or in Safari\'s order', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx } = await page();
   await installSandbox(p);
   const result = await p.evaluate(async () => {
@@ -566,7 +559,7 @@ test('IME: the Enter that picks a word never sends, in Chrome or in Safari\'s or
 });
 
 test('focus: Send keeps it in the box, from the mouse or the keyboard; × gives it to the box; configure keeps it', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx } = await page();
   const box = p.locator(`${thread('directions')} .ct-input`);
   const focusedIsBox = () => box.evaluate((el) => document.activeElement === el);
@@ -598,7 +591,7 @@ test('focus: Send keeps it in the box, from the mouse or the keyboard; × gives 
 });
 
 test('keyboard: with enterSends off, Enter breaks the line and Ctrl+Enter sends', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx } = await page();
   await installSandbox(p);
   await p.evaluate(async () => {
@@ -618,7 +611,7 @@ test('keyboard: with enterSends off, Enter breaks the line and Ctrl+Enter sends'
 });
 
 test('the box grows without scrolling the page back', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx } = await page(1200, 700);
   // a box already four lines tall, at the very bottom of the page: measuring it must not leave the page scrolled back
   const box = p.locator(`${thread('reminders')} .ct-input`);
@@ -635,7 +628,7 @@ test('the box grows without scrolling the page back', async (t) => {
 });
 
 test('typing dots: bare dots for a side that narrates in notes, a bubble for one that talks in bubbles', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx, errors } = await page();
   const reading = p.locator(`${thread('reading')} .ct-typing`);
   assert.equal(await reading.getAttribute('class'), 'ct-msg ct-msg--theirs ct-typing');
@@ -669,7 +662,7 @@ test('typing dots: bare dots for a side that narrates in notes, a bubble for one
 });
 
 test('motion: messages arrive and leave eased, Read more unrolls, and nothing jumps at the end', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx, errors } = await page(1200, 900, { reducedMotion: 'no-preference' });
   await installSandbox(p);
   const result = await p.evaluate(async () => {
@@ -737,7 +730,7 @@ test('motion: messages arrive and leave eased, Read more unrolls, and nothing ju
 });
 
 test('live updates: a redraw keeps Read more open and the focus; an echo of a send is one message', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx, errors } = await page();
   await installSandbox(p);
   const result = await p.evaluate(async () => {
@@ -769,7 +762,7 @@ test('live updates: a redraw keeps Read more open and the focus; an echo of a se
 });
 
 test('the log: no live region inside it, and a reload is not read out', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx } = await page();
   await installSandbox(p);
   const result = await p.evaluate(async () => {
@@ -787,7 +780,7 @@ test('the log: no live region inside it, and a reload is not read out', async (t
 });
 
 test('edge cases: an empty thread, many messages, a thread hydrated on its own element', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx, errors } = await page();
   await installSandbox(p);
   const result = await p.evaluate(async () => {
@@ -831,7 +824,7 @@ test('edge cases: an empty thread, many messages, a thread hydrated on its own e
 });
 
 test('the page switch repaints every thread and the page, the WhatsApp previews keep their skin, and the choice is remembered', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx, errors } = await page(1200, 900, { colorScheme: 'dark' });
   const paint = () => p.evaluate(() => {
     const bg = (el) => getComputedStyle(el).backgroundColor;
@@ -865,7 +858,7 @@ test('the page switch repaints every thread and the page, the WhatsApp previews 
   assert.equal((await paint()).task, DARK, 'Dark wins over a light system');
 
   // storage refused (a private window, blocked site data): the switch still works
-  const blocked = await browser.newContext({ colorScheme: 'dark', reducedMotion: 'reduce' });
+  const blocked = await newContext(browser, { colorScheme: 'dark', reducedMotion: 'reduce' });
   await blocked.addInitScript(() => { Object.defineProperty(window, 'localStorage', { get() { throw new Error('blocked'); } }); });
   const q = await blocked.newPage();
   const qErrors = [];
@@ -931,7 +924,7 @@ function measureThemes(p) {
 }
 
 test('every theme passes WCAG AA: text, muted text, links, names and titles on both bubbles and on the page', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx } = await page();
   const failing = [];
   for (const scheme of ['dark', 'light']) {
@@ -957,7 +950,7 @@ test('every theme passes WCAG AA: text, muted text, links, names and titles on b
 for (const width of [360, 1200]) {
   for (const scheme of ['light', 'dark']) {
     test(`no horizontal scroll at ${width} px in ${scheme}, with a long code line, a long link and a long word`, async (t) => {
-      if (!browser) return t.skip('no browser');
+      if (!browser) return t.skip(skip);
       const { p, ctx, errors } = await page(width, 800);
       await p.click(`[data-scheme="${scheme}"]`);
       await p.evaluate(() => {

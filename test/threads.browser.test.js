@@ -1,24 +1,17 @@
-// createThreads in a real browser, on the demo's Threads section (see chat-thread.browser.test.js
-// for how the browser is found). Skipped when there is none.
+// createThreads in a real browser, on the demo's Threads section (test/browser.js finds the browser
+// and pins the language and time zone).
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { serve } from '../scripts/serve-demo.mjs';
+import { launch, newContext } from './browser.js';
 
-let chromium;
 let browser;
+let skip;
 let server;
 let base;
 
 before(async () => {
-  try {
-    ({ chromium } = await import('playwright-core'));
-    browser = await chromium.launch({
-      headless: true,
-      ...(process.env.PW_EXECUTABLE ? { executablePath: process.env.PW_EXECUTABLE } : { channel: process.env.PW_CHANNEL || 'chrome' }),
-    });
-  } catch {
-    browser = null;
-  }
+  ({ browser, skip } = await launch());
   server = await serve(0);
   base = `http://127.0.0.1:${server.address().port}`;
 });
@@ -29,7 +22,7 @@ after(async () => {
 });
 
 async function page(width = 1200, height = 900, { colorScheme = 'dark' } = {}) {
-  const ctx = await browser.newContext({ viewport: { width, height }, colorScheme, reducedMotion: 'reduce' });
+  const ctx = await newContext(browser, { viewport: { width, height }, colorScheme, reducedMotion: 'reduce' });
   await ctx.addInitScript(() => document.addEventListener('securitypolicyviolation', (e) => console.error(`CSP: ${e.violatedDirective} ${e.blockedURI}`)));
   const p = await ctx.newPage();
   const errors = [];
@@ -46,7 +39,7 @@ const closeAll = async (p) => { while (await p.locator(`${team} .ct-th--open`).c
 const visible = (p, sel) => p.locator(sel).evaluateAll((els) => els.filter((e) => e.offsetParent !== null).length);
 
 test('threads keep the order they were opened in, with the resolved ones hidden behind a button on top', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx, errors } = await page();
   assert.equal(await p.locator(`${team} .ct-th`).count(), 3);
   assert.equal(await visible(p, `${team} .ct-th`), 2, 'the resolved one is hidden');
@@ -63,7 +56,7 @@ test('threads keep the order they were opened in, with the resolved ones hidden 
 });
 
 test('there is one message box: the one of the thread you are in', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx, errors } = await page();
   assert.equal(await visible(p, `${team} .ct-composer`), 1);
   // opening the idle thread moves the box there
@@ -79,7 +72,7 @@ test('there is one message box: the one of the thread you are in', async (t) => 
 });
 
 test('the box at the bottom opens a thread, and the text goes there, not to the box', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx, errors } = await page();
   await closeAll(p);
   await p.locator(`${team} .ct-th-new .ct-input`).fill('Who has the keys?');
@@ -95,7 +88,7 @@ test('the box at the bottom opens a thread, and the text goes there, not to the 
 });
 
 test('Ctrl+Shift+Enter or the Branch button opens a thread derived from the one you are in', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx, errors } = await page();
   const branch = p.locator(`${team} .ct-th--active .ct-th-branch`);
   assert.equal(await branch.isDisabled(), true, 'nothing typed, nothing to branch');
@@ -119,7 +112,7 @@ test('Ctrl+Shift+Enter or the Branch button opens a thread derived from the one 
 });
 
 test('resolving folds a thread into one line; reopening brings it back', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx, errors } = await page();
   const th = p.locator(`${team} .ct-th`).nth(1);
   await th.locator('.ct-th-resolve').click();
@@ -138,7 +131,7 @@ test('resolving folds a thread into one line; reopening brings it back', async (
 });
 
 test('a title someone gives wins over the first line; an AI title carries its mark', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx, errors } = await page();
   const th = p.locator(`${team} .ct-th`).nth(1);
   assert.match(await th.locator('.ct-th-ai').textContent(), /Assistant/);
@@ -156,7 +149,7 @@ test('a title someone gives wins over the first line; an AI title carries its ma
 });
 
 test('a working thread shows the typing dots and its activity; the questions header shows Qn and the state', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx, errors } = await page();
   const q2 = p.locator(`${session} .ct-th`).last();
   assert.equal(await q2.locator('.ct-th-n').textContent(), 'Q2');
@@ -176,7 +169,7 @@ test('a working thread shows the typing dots and its activity; the questions hea
 });
 
 test('the list follows a new message only when the reader was at the bottom', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx, errors } = await page(1200, 900);
   const gap = () => p.evaluate((sel) => { const l = document.querySelector(`${sel} .ct-th--active .ct-list`); return l.scrollHeight - l.scrollTop - l.clientHeight; }, team);
   const add = (n) => p.evaluate((count) => { for (let i = 0; i < count; i++) window.demoThreads.team.append('t2', { from: 'other', author: 'Ana', text: `line ${i}\nmore\nmore`, at: new Date().toISOString() }); }, n);
@@ -193,7 +186,7 @@ test('the list follows a new message only when the reader was at the bottom', as
 });
 
 test('typing in a thread keeps the focus and the text while messages arrive', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx, errors } = await page();
   const input = p.locator(`${team} .ct-th--active .ct-input`);
   await input.click();
@@ -212,7 +205,7 @@ test('typing in a thread keeps the focus and the text while messages arrive', as
 });
 
 test('threads fit a phone and a light page', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   for (const [w, scheme] of [[360, 'dark'], [1200, 'light']]) {
     const { p, ctx, errors } = await page(w, 800, { colorScheme: scheme });
     assert.equal(await p.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, `no sideways scroll at ${w}`);
@@ -224,7 +217,7 @@ test('threads fit a phone and a light page', async (t) => {
 });
 
 test('threads a page adds after createThreads get the box', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx, errors } = await page();
   const r = await p.evaluate(async () => {
     const { createThreads } = await import('/src/chat-thread.js');
@@ -241,7 +234,7 @@ test('threads a page adds after createThreads get the box', async (t) => {
 });
 
 test('a long thread shows its latest messages, the earlier ones behind a button', async (t) => {
-  if (!browser) return t.skip('no browser');
+  if (!browser) return t.skip(skip);
   const { p, ctx, errors } = await page();
   await p.evaluate(() => { for (let i = 0; i < 5; i++) window.demoThreads.team.append('t2', { from: 'other', author: 'Ana', text: `n${i}`, at: new Date().toISOString() }); });
   const th = p.locator(`${team} .ct-th--active`);
@@ -261,8 +254,8 @@ test('a long thread shows its latest messages, the earlier ones behind a button'
 });
 
 test('showing earlier messages rises them in; folding back fades them out first', async (t) => {
-  if (!browser) return t.skip('no browser');
-  const ctx = await browser.newContext({ viewport: { width: 1200, height: 900 }, reducedMotion: 'no-preference' });
+  if (!browser) return t.skip(skip);
+  const ctx = await newContext(browser, { viewport: { width: 1200, height: 900 }, reducedMotion: 'no-preference' });
   const p = await ctx.newPage();
   const errors = [];
   p.on('pageerror', (e) => errors.push(e.message));

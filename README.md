@@ -2,13 +2,15 @@
 
 A WhatsApp-style conversation thread for any app that talks: to a person, a group, an AI or a background job. My messages on the right with time and ticks, the other side on the left with its name, a safe markdown subset with copyable code, and a pill box that grows as you type.
 
-Vanilla JS, zero runtime dependencies, about 56 kB unminified (19 kB gzipped). The HTML comes from a pure function, so a server draws the same thread the browser does. A SQLite store and an HTTP handler for Node come with it.
+[![CI](https://github.com/rbritta/chat-thread/actions/workflows/ci.yml/badge.svg)](https://github.com/rbritta/chat-thread/actions/workflows/ci.yml) [![Release](https://img.shields.io/github/v/release/rbritta/chat-thread)](https://github.com/rbritta/chat-thread/releases) [![License: MIT](https://img.shields.io/github/license/rbritta/chat-thread)](LICENSE) [![Live demo](https://img.shields.io/badge/demo-live-2ea043)](https://rbritta.github.io/chat-thread/demo/)
 
 ![A task thread: plan, a long answer behind "Read more", a queued message and the box](docs/thread.png)
 
-**[Live demo](https://rbritta.github.io/chat-thread/demo/)** · [Use it](#use-it) · [Options](#options) · [Messages](#messages) · [Themes](#themes) · [Server](#server) · [For AI agents](AGENTS.md) · [Roadmap](TODO.md)
+**[Live demo](https://rbritta.github.io/chat-thread/demo/)** · [Install](#install) · [Quick start](#quick-start) · [Options](#options) · [Messages](#messages) · [Themes](#themes) · [Server](#server) · [For AI agents](AGENTS.md) · [Roadmap](TODO.md)
 
 ## What it does
+
+Vanilla JS, zero runtime dependencies, about 81 kB unminified (26 kB gzipped) plus 23 kB of CSS. The HTML comes from a pure function, so a server draws the same thread the browser does. A SQLite store and an HTTP handler for Node come with it.
 
 - **Sides, not labels.** Mine on the right in green, theirs on the left with the author's name (a session, an AI, each person in a group, each with a color if you want). The corner on the author's side is almost square.
 - **Time and ticks inside the bubble**, at the end of the last line: a clock while pending or queued, one tick sent, two delivered, two in color read.
@@ -36,11 +38,25 @@ Vanilla JS, zero runtime dependencies, about 56 kB unminified (19 kB gzipped). T
   <img src="docs/whatsapp.png" alt="Light WhatsApp previews with bold, italic, strike, blue ticks and a scheduled clock" width="400">
 </p>
 
-## Use it
+## Install
 
 ```sh
 npm install github:rbritta/chat-thread
 ```
+
+No runtime dependencies. Pin a commit (`github:rbritta/chat-thread#<commit>`) or a release tag for repeatable installs. The package exports `chat-thread` (the browser API), `chat-thread/core` (pure rendering, no DOM), `chat-thread/server` (the SQLite store and the HTTP handler, Node 22.5+), `chat-thread/style.css`, and the bundles `chat-thread/global` and `chat-thread/bundle`.
+
+No bundler and no modules? Use the classic build, which defines `window.ChatThread`:
+
+```html
+<link rel="stylesheet" href="dist/chat-thread.css">
+<script src="dist/chat-thread.global.js"></script>
+<script>ChatThread.createChat(el, { store: ChatThread.memoryStore() });</script>
+```
+
+`dist/chat-thread.mjs` is the same code as a single ES module.
+
+## Quick start
 
 ```html
 <link rel="stylesheet" href="node_modules/chat-thread/src/chat-thread.css">
@@ -62,16 +78,6 @@ npm install github:rbritta/chat-thread
   chat.append({ from: 'other', text: 'All **4** backups ran.' });
 </script>
 ```
-
-No bundler and no modules? Use the classic build, which defines `window.ChatThread`:
-
-```html
-<link rel="stylesheet" href="dist/chat-thread.css">
-<script src="dist/chat-thread.global.js"></script>
-<script>ChatThread.createChat(el, { store: ChatThread.memoryStore() });</script>
-```
-
-`dist/chat-thread.mjs` is the same code as a single ES module.
 
 ### Drawn on the server
 
@@ -269,17 +275,35 @@ store.add('support', { from: 'other', author: 'Assistant', text: 'Done.' });
 
 The browser can only write as `me`, and only bubbles; notes (`store.add(thread, { kind: 'note', text })`), replies and state changes (`store.update(thread, id, { state: 'read' })`, a streamed `{ text }`) come from your server. If a framework already read the body, `req.body` is used. Nothing is deleted: removed messages keep their row with a timestamp. `onChange` gets every `add`, `update` and `remove`. A table made by 0.1.0 gets the `kind` column the first time a store opens it.
 
+## Part of a small family
+
+Each works alone; together they need no glue code.
+
+| Project | What it does |
+| --- | --- |
+| [ai-signalbox](https://github.com/rbritta/ai-signalbox) | A coordination layer for several AI coding sessions on one machine: who is doing what, shared resources, asks and threads with the person. |
+| [ai-threads](https://github.com/rbritta/ai-threads) | Numbered threads between a person and one AI coding session, and the delivery of each message into it. |
+| **chat-thread** | The conversation on screen: bubbles, ticks, threads and the message box. ai-threads' `view()` returns threads in the shape its `createThreads` takes. |
+| [postit-board](https://github.com/rbritta/postit-board) | A glass board of sticky notes for an app's home screen, with notes the app pins and takes down by itself. |
+| [claude-session-relay](https://github.com/rbritta/claude-session-relay) | Drive the Claude Code tabs of any VS Code window from a script, a bot or a web panel, through a plain file inbox. |
+
 ## Develop
 
 ```sh
-npm install          # only playwright-core, for the browser tests and screenshots
-npm test             # core, server and browser tests (installed Chrome; set PW_CHANNEL=msedge for Edge)
-npm run demo         # http://localhost:5179/demo/
-npm run build        # dist/ (commit it: script-tag users take it from the repo)
-npm run screenshots  # regenerates docs/*.png from the demo
+git clone https://github.com/rbritta/chat-thread.git && cd chat-thread
+npm ci                 # only playwright-core, for the browser tests and screenshots
+npm test               # core, server and browser tests (an installed Chrome; PW_CHANNEL=msedge for Edge)
+npm run test:coverage  # the same, with a coverage summary of the code Node runs
+npm run demo           # http://localhost:5179/demo/
+npm run build          # dist/ (commit it: script-tag users take it from the repo)
+npm run screenshots    # regenerates docs/*.png from the demo
 ```
 
-Node 22.5 or newer (for `node:sqlite` in the tests). Issues and pull requests are welcome; keep it dependency-free. Why the library looks the way it does: [docs/extraction.md](docs/extraction.md).
+Node 22.5 or newer (for `node:sqlite` in the tests). 86 tests: 44 run in Node (the core, the server, the release notes) and 42 in a real browser. The browser tests pin the language, the time zone and the clock, so they give the same result on any machine; with no browser installed they skip and say why (CI makes that an error). Why the library looks the way it does: [docs/extraction.md](docs/extraction.md).
+
+## Contributing
+
+Issues and pull requests are welcome; keep it dependency-free. [CONTRIBUTING.md](CONTRIBUTING.md) has the setup, what a pull request needs and how releases are made, and [SECURITY.md](SECURITY.md) how to report a vulnerability privately. Everyone taking part follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 

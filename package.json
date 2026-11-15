@@ -1,6 +1,6 @@
 {
   "name": "chat-thread",
-  "version": "0.5.3",
+  "version": "0.5.4",
   "description": "A WhatsApp-style conversation thread: bubbles by side, time and ticks, notes without a bubble for bots that narrate, safe markdown with copyable code, a growing message box, read-only and preview modes, dark, light or auto themes. Zero dependencies, vanilla JS, server-side rendering and a SQLite store for Node.",
   "keywords": ["chat", "conversation", "thread", "messages", "whatsapp", "bubbles", "markdown", "dark-mode", "light-theme", "vanilla-js", "sqlite", "no-dependencies"],
   "homepage": "https://github.com/rbritta/chat-thread",
@@ -24,6 +24,7 @@
   "scripts": {
     "build": "node scripts/build.mjs",
     "test": "node --test \"test/*.test.js\"",
+    "test:coverage": "node --test --experimental-test-coverage --test-coverage-include=src/core.js --test-coverage-include=\"server/**\" --test-coverage-include=scripts/release-notes.mjs \"test/*.test.js\"",
     "demo": "node scripts/serve-demo.mjs",
     "screenshots": "node scripts/screenshots.mjs",
     "prepublishOnly": "npm run build && npm test"

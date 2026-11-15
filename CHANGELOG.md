@@ -1,18 +1,40 @@
 # Changelog
 
-## 0.5.3 (2026-11-14)
+All notable changes to this project are documented here. The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.5.4] - 2026-11-14
+
+Project housekeeping: the library itself is unchanged.
+
+### Added
+
+- `CONTRIBUTING.md`, `SECURITY.md` (private vulnerability reporting), `CODE_OF_CONDUCT.md` (Contributor Covenant 2.1), issue forms, a pull request template and Dependabot for the actions and npm.
+- `release.yml`: a `v*` tag runs the tests and publishes a GitHub Release with that version's section of this file as its notes and the `npm pack` tarball attached. `scripts/release-notes.mjs` cuts the section and refuses a tag that is not the version in `package.json`.
+- `npm run test:coverage`: the tests with a coverage summary of the code Node runs (`src/core.js`, `server/`).
+
+### Changed
+
+- CI runs on Ubuntu and Windows with Node 22 and 24, with read-only permissions, cancels a run that a newer push replaces, checks that `dist/` is current and prints the coverage summary.
+- The browser tests share one launcher (`test/browser.js`) and always run in CI (`PW_REQUIRE=1`): there, a missing browser fails the run. Elsewhere they skip with the reason printed, instead of silently.
+- The browser tests pin the page's language (en-US), time zone (UTC) and clock, and Node's zone, so they give the same result on any machine.
+- The README follows the shape of its sibling repositories (badges, install, quick start, the family table), with the size measured again: the bundle grew with `createThreads` in 0.5.0, to about 81 kB unminified, 26 kB gzipped.
+- This file follows Keep a Changelog.
+
+## [0.5.3] - 2026-11-14
 
 - The motion of 0.5.2 was lost in a long thread: the earlier messages appeared above the view, all at once. Now the list unrolls (its height grows over 0.28 s) with the latest messages held at the bottom and the earlier ones coming down from above; "Show only the latest" rolls it back while they fade.
 
-## 0.5.2 (2026-11-14)
+## [0.5.2] - 2026-11-14
 
 - A light motion on "Show N earlier" and "Show only the latest": the earlier messages rise in (fade from 6 px below, 0.22 s); folding back fades them out before they go. None with `prefers-reduced-motion`.
 
-## 0.5.1 (2026-11-14)
+## [0.5.1] - 2026-11-14
 
 - "Show N earlier messages" in purple (`--ct-th-earlier`, `--ct-th-earlier-border`), so it is seen at a glance.
 
-## 0.5.0 (2026-11-14)
+## [0.5.0] - 2026-11-14
 
 New
 
@@ -21,14 +43,14 @@ New
 - `THREAD_STRINGS`, `THREAD_MODES`, `THREAD_HEADERS` and `threadTitle` are exported for apps that draw their own header.
 - The demo has a Threads section; `test/threads.browser.test.js` covers it.
 
-## 0.4.0 (2026-11-14)
+## [0.4.0] - 2026-11-14
 
 Dates and times follow the browser, and the app can say otherwise.
 
 - `hour12` now defaults to the locale's own clock: `17:50` in Brazil or Britain, `5:50 PM` in the United States. It used to be always 24 hours; pass `hour12: false` to keep that.
 - README: a "Dates and times" section with examples, and what to pass when the thread is drawn on a server, where there is no browser to follow.
 
-## 0.3.0 (2026-11-13)
+## [0.3.0] - 2026-11-13
 
 A full review: safer links, a server-rendered thread that hydrates with its own options, quiet motion, accessibility, and every example of the demo in light and dark. Nothing in the API was renamed or removed.
 
@@ -76,7 +98,7 @@ Build and tests
 - The build refuses to run when `core.js` and `chat-thread.js` declare the same top-level name.
 - 67 tests (42 before): every fix above has one, plus contrast in every theme, no horizontal scroll at 360 and 1200 px in light and dark, 1500 messages, an empty thread and the motion.
 
-## 0.2.0 (2026-11-13)
+## [0.2.0] - 2026-11-13
 
 For light apps and for bots that narrate.
 
@@ -87,7 +109,7 @@ For light apps and for bots that narrate.
 - Each theme sets `color-scheme`, so native checkboxes and scrollbars match it.
 - Demo: a "Light and auto" section with a booking assistant and a System / Light / Dark switch. README: Themes and Notes; AGENTS.md: apps with their own light/dark switch, React included.
 
-## 0.1.0 (2026-11-13)
+## [0.1.0] - 2026-11-13
 
 First release, extracted from six apps that each drew their own conversation: two dev dashboards, a Bible reading app, a WhatsApp log viewer and two clinic messaging tools ([docs/extraction.md](docs/extraction.md)).
 
@@ -99,3 +121,6 @@ First release, extracted from six apps that each drew their own conversation: tw
 - `renderThread` and friends as pure functions for server-side rendering, `createChat` with `hydrate` in the browser.
 - `memoryStore`, `localStore`, `restStore`, the SQLite store and the HTTP handler for Node.
 - `dist/` builds for a script tag (`window.ChatThread`) and for import (`chat-thread.mjs`). CSP-safe markup.
+
+[Unreleased]: https://github.com/rbritta/chat-thread/compare/v0.5.4...HEAD
+[0.5.4]: https://github.com/rbritta/chat-thread/releases/tag/v0.5.4

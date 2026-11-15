@@ -1,4 +1,4 @@
-/*! chat-thread v0.5.3 | MIT | https://github.com/rbritta/chat-thread */
+/*! chat-thread v0.5.4 | MIT | https://github.com/rbritta/chat-thread */
 (function (global) {
 'use strict';
 /**
