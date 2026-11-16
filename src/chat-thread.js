@@ -18,7 +18,7 @@
  * script only hydrates it (`hydrate: true`), with the options the server wrote into it.
  */
 import {
-  dayKey, normalizeMessage, renderDay, renderList, renderMessage, renderThread, renderTyping,
+  dayKey, escapeHtml, normalizeMessage, renderDay, renderList, renderMessage, renderThread, renderTyping,
   renderWaiting, resolveOptions,
 } from './core.js';
 
@@ -144,7 +144,7 @@ export function createChat(el, options = {}) {
 
   const listeners = [
     ['click', onClick], ['keydown', onKeydown], ['input', onInput], ['mousedown', onMouseDown],
-    ['compositionstart', onComposition], ['compositionend', onComposition],
+    ['compositionstart', onComposition], ['compositionend', onComposition], ['change', onChange],
   ];
 
   function mount(hydrate) {
@@ -161,8 +161,178 @@ export function createChat(el, options = {}) {
 
   function unmount() {
     if (!root) return;
+    closeMenu();
+    camera.close();
     for (const [type, fn] of listeners) root.removeEventListener(type, fn);
   }
+
+  /* ---- the + menu ---- */
+  const attachButton = () => root?.querySelector('.ct-attach');
+  const menu = () => root?.querySelector('.ct-menu');
+  function outside(ev) {
+    if (!ev.target.closest?.('.ct-attach, .ct-menu')) closeMenu();
+  }
+  function openMenu() {
+    const m = menu();
+    if (!m) return;
+    m.hidden = false;
+    attachButton()?.setAttribute('aria-expanded', 'true');
+    m.querySelector('.ct-menu-item')?.focus();
+    document.addEventListener('pointerdown', outside, true);
+  }
+  function closeMenu(refocus = false) {
+    document.removeEventListener('pointerdown', outside, true);
+    const m = menu();
+    if (!m || m.hidden) return;
+    m.hidden = true;
+    attachButton()?.setAttribute('aria-expanded', 'false');
+    if (refocus) attachButton()?.focus();
+  }
+
+  /* ---- the camera: live video on a computer, the phone's own camera through the file input ---- */
+  const camera = (() => {
+    let layer = null;
+    let stream = null;
+    let shot = null;   // the canvas with the photo taken
+    let viaFile = false;
+    const MAX_SIDE = 2048;
+    const X_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+
+    const stop = () => {
+      for (const track of stream?.getTracks?.() ?? []) track.stop();
+      stream = null;
+    };
+    const q = (sel) => layer?.querySelector(sel);
+
+    function build() {
+      const s = opts.strings;
+      const sendIcon = root.querySelector('.ct-send')?.innerHTML ?? '';
+      layer = fragment(`<div class="ct-cam" role="dialog" aria-modal="true" aria-label="${escapeHtml(s.camera)}">
+<div class="ct-cam-top"><button type="button" class="ct-cam-close" aria-label="${escapeHtml(s.close)}" title="${escapeHtml(s.close)}">${X_ICON}</button><span class="ct-cam-title"></span></div>
+<div class="ct-cam-view"><video class="ct-cam-video" autoplay muted playsinline></video><canvas class="ct-cam-shot" hidden></canvas></div>
+<div class="ct-cam-foot ct-cam-foot--live"><button type="button" class="ct-cam-take" aria-label="${escapeHtml(s.takePhoto)}" title="${escapeHtml(s.takePhoto)}"></button></div>
+<div class="ct-cam-foot ct-cam-foot--shot" hidden><button type="button" class="ct-cam-retake">${escapeHtml(s.retake)}</button><div class="ct-field"><textarea class="ct-cam-caption" rows="1" maxlength="2000" placeholder="${escapeHtml(s.caption)}" aria-label="${escapeHtml(s.caption)}"></textarea></div><button type="button" class="ct-send ct-cam-send" aria-label="${escapeHtml(s.send)}" title="${escapeHtml(s.send)}">${sendIcon}</button></div>
+</div>`).firstElementChild;
+      layer.addEventListener('click', onLayerClick);
+      layer.addEventListener('keydown', onLayerKey);
+      root.appendChild(layer);
+    }
+
+    function show(phase) {
+      const live = phase === 'live';
+      q('.ct-cam-video').hidden = !live;
+      q('.ct-cam-shot').hidden = live;
+      q('.ct-cam-foot--live').hidden = !live;
+      q('.ct-cam-foot--shot').hidden = live;
+      q('.ct-cam-title').textContent = live ? opts.strings.takePhoto : opts.strings.photo;
+      (live ? q('.ct-cam-take') : q('.ct-cam-caption'))?.focus();
+    }
+
+    /** The picture, at most MAX_SIDE on its long side, on the preview canvas. */
+    function keep(source, width, height) {
+      const scale = Math.min(1, MAX_SIDE / Math.max(width, height));
+      const c = q('.ct-cam-shot');
+      c.width = Math.round(width * scale);
+      c.height = Math.round(height * scale);
+      c.getContext('2d').drawImage(source, 0, 0, c.width, c.height);
+      shot = c;
+      show('shot');
+    }
+
+    async function live() {
+      viaFile = false;
+      if (!layer) build();
+      show('live');
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+        if (!layer) return stop();   // closed while the browser asked
+        q('.ct-cam-video').srcObject = stream;
+      } catch (err) {
+        // no camera, or the permission refused: the file input still lets a photo in
+        close();
+        pick();
+      }
+    }
+
+    function pick() {
+      viaFile = true;
+      const file = root.querySelector('.ct-file');
+      if (!file) return;
+      file.value = '';
+      file.click();
+    }
+
+    async function fromFile(file) {
+      if (!file || !/^image\//.test(file.type)) return;
+      try {
+        const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
+        if (!layer) build();
+        keep(bitmap, bitmap.width, bitmap.height);
+        bitmap.close?.();
+      } catch (err) {
+        fail(err);
+      }
+    }
+
+    function take() {
+      const video = q('.ct-cam-video');
+      if (!video?.videoWidth) return;
+      keep(video, video.videoWidth, video.videoHeight);
+      stop();
+    }
+
+    async function deliver() {
+      if (!shot) return;
+      const caption = q('.ct-cam-caption').value.trim();
+      const photo = await new Promise((resolve) => shot.toBlob(resolve, 'image/jpeg', 0.85));
+      close();
+      if (photo) send(caption, { photo });
+      input?.focus();
+    }
+
+    function close() {
+      stop();
+      shot = null;
+      if (!layer) return;
+      layer.remove();
+      layer = null;
+    }
+
+    function onLayerClick(ev) {
+      const b = ev.target.closest?.('button');
+      if (!b) return;
+      if (b.classList.contains('ct-cam-close')) {
+        close();
+        attachButton()?.focus();
+      } else if (b.classList.contains('ct-cam-take')) take();
+      else if (b.classList.contains('ct-cam-retake')) {
+        if (viaFile) pick();
+        else live();
+      } else if (b.classList.contains('ct-cam-send')) deliver();
+    }
+
+    function onLayerKey(ev) {
+      if (ev.key === 'Escape') {
+        ev.preventDefault();
+        close();
+        attachButton()?.focus();
+      } else if (ev.key === 'Enter' && !ev.shiftKey && ev.target.classList?.contains('ct-cam-caption') && !ev.isComposing) {
+        ev.preventDefault();
+        deliver();
+      }
+    }
+
+    return {
+      /** A phone (coarse pointer) or a browser with no camera API opens the phone's camera app. */
+      open() {
+        const coarse = globalThis.matchMedia?.('(pointer: coarse)').matches;
+        if (coarse || !navigator.mediaDevices?.getUserMedia) pick();
+        else live();
+      },
+      fromFile,
+      close,
+    };
+  })();
 
   /** Puts a freshly drawn thread where the old one is, keeping the element the app holds. */
   function place(fresh) {
@@ -359,14 +529,17 @@ export function createChat(el, options = {}) {
     return values;
   }
 
-  async function send(raw) {
-    const fromBox = raw === undefined;
-    const value = String(fromBox ? input?.value ?? '' : raw).replace(/\s+$/, '').replace(/^\n+/, '');
-    if (!value.trim() || opts.mode !== 'chat') return null;
+  /** Sends the box's text, or `raw`; with `photo` (a Blob), `raw` is its caption and may be empty. */
+  async function send(raw, { photo = null } = {}) {
+    const fromBox = raw === undefined && !photo;
+    const value = String(fromBox ? input?.value ?? '' : raw ?? '').replace(/\s+$/, '').replace(/^\n+/, '');
+    if ((!value.trim() && !photo) || opts.mode !== 'chat') return null;
     const toggles = readToggles();
-    const draft = { from: 'me', text: value, at: opts.now().toISOString() };
+    const hasToggles = Object.keys(toggles).length > 0;
+    const text = photo ? `📷 ${value.trim() || opts.strings.photo}` : value;
+    const draft = { from: 'me', text, at: opts.now().toISOString() };
     if (opts.sendState) draft.state = opts.sendState;
-    if (Object.keys(toggles).length) draft.meta = { toggles };
+    if (hasToggles || photo) draft.meta = { ...(hasToggles ? { toggles } : {}), ...(photo ? { photo: { type: photo.type, size: photo.size } } : {}) };
     // the box empties before anything is awaited, so a second Enter finds nothing to send
     if (fromBox) {
       input.value = '';
@@ -378,7 +551,9 @@ export function createChat(el, options = {}) {
     let saved = null;
     try {
       if (opts.store) saved = await opts.store.send(draft);
-      const answer = await given.onSend?.(value, { toggles, message: saved || draft, chat: api });
+      const info = { toggles, message: saved || draft, chat: api };
+      if (photo) Object.assign(info, { photo, caption: value.trim() });
+      const answer = await given.onSend?.(text, info);
       if (!saved && answer && typeof answer === 'object') saved = answer;
     } catch (err) {
       settleDraft(temp, { ...temp, state: 'failed', alert: true });
@@ -497,9 +672,15 @@ export function createChat(el, options = {}) {
 
   function onClick(ev) {
     const button = ev.target.closest?.('button');
-    if (!button || !root.contains(button)) return;
+    if (!button || !root.contains(button) || button.closest('.ct-cam')) return;
     const is = (cls) => button.classList.contains(cls);
-    if (is('ct-send')) {
+    if (is('ct-attach')) {
+      if (menu()?.hidden === false) closeMenu();
+      else openMenu();
+    } else if (is('ct-menu-item')) {
+      closeMenu();
+      if (button.dataset.attach === 'camera') camera.open();
+    } else if (is('ct-send')) {
       send();
       // pressed from the keyboard, the button is now disabled: the focus goes back to the box
       input?.focus();
@@ -533,12 +714,22 @@ export function createChat(el, options = {}) {
   }
 
   function onKeydown(ev) {
+    if (ev.key === 'Escape' && menu()?.hidden === false) {
+      ev.preventDefault();
+      closeMenu(true);
+      return;
+    }
     if (ev.target !== input || ev.key !== 'Enter' || ev.shiftKey) return;
     if (composing || ev.isComposing || ev.keyCode === 229) return;
     // with enterSends off, Ctrl+Enter (Cmd+Enter on a Mac) still sends
     if (!opts.enterSends && !ev.ctrlKey && !ev.metaKey) return;
     ev.preventDefault();
     send();
+  }
+
+  function onChange(ev) {
+    if (!ev.target.classList?.contains('ct-file')) return;
+    camera.fromFile(ev.target.files?.[0]);
   }
 
   function onInput(ev) {
@@ -601,8 +792,10 @@ export function createChat(el, options = {}) {
       }
       return messages;
     },
-    /** Sends a text as if it had been typed in the box. */
-    send: (value) => send(value),
+    /** Sends a text as if it had been typed in the box; `{ photo }` (a Blob) sends a photo with `value` as its caption. */
+    send: (value, extra) => send(value, extra),
+    /** Opens the camera, as the + menu's Camera does (only with `attach: ['camera']`). */
+    openCamera() { if (root?.querySelector('.ct-file')) camera.open(); },
     /** New options. The text being typed, the toggles' boxes and the focus in the box are kept. */
     configure(next = {}) {
       const draft = input?.value ?? '';

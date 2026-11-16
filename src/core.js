@@ -38,7 +38,17 @@ export const DEFAULT_STRINGS = Object.freeze({
   read: 'Read',
   failed: 'Not sent',
   suggestions: 'Suggestions',
+  attach: 'Attach',
+  camera: 'Camera',
+  takePhoto: 'Take photo',
+  retake: 'Take another',
+  caption: 'Caption',
+  close: 'Close',
+  photo: 'Photo',
 });
+
+/** What the + left of the box can offer. Only `camera` for now: take a photo and send it with a caption. */
+export const ATTACH = Object.freeze(['camera']);
 
 export const DEFAULTS = Object.freeze({
   mode: 'chat',
@@ -56,6 +66,7 @@ export const DEFAULTS = Object.freeze({
   typingKind: 'auto',
   chips: Object.freeze([]),
   toggles: Object.freeze([]),
+  attach: Object.freeze([]),
   locale: undefined,
   timeZone: undefined,
   hour12: undefined,
@@ -94,6 +105,7 @@ export function resolveOptions(options = {}) {
   o.author = clip(o.author, LIMITS.author).trim();
   o.chips = normalizeChips(o.chips);
   o.toggles = normalizeToggles(o.toggles);
+  o.attach = normalizeAttach(o.attach);
   if (!STATES.includes(o.sendState)) o.sendState = null;
   if (typeof o.hour12 !== 'boolean') o.hour12 = undefined;
   o.now = typeof given.now === 'function' ? given.now : () => new Date();
@@ -421,6 +433,12 @@ export function normalizeToggles(list) {
     .slice(0, LIMITS.toggles);
 }
 
+/** The + menu's items: known names only, each once, in the order given. */
+export function normalizeAttach(list) {
+  if (!Array.isArray(list)) return [];
+  return [...new Set(list.filter((a) => ATTACH.includes(a)))];
+}
+
 /** Whether a text starts collapsed behind "Read more" (the browser unfolds it if it fits after all). */
 export const isLong = (value, clamp = DEFAULTS.clamp) =>
   clamp > 0 && (String(value ?? '').length > clamp || String(value ?? '').split('\n').length > 10);
@@ -437,6 +455,9 @@ export const fill = (template, values = {}) => String(template).replace(/\{(\w+)
 
 const TICK_PATH = 'M2 13l4 4 8-9M10 16l1 1 9-10';
 const icon = (cls, label, inner) => `<svg class="ct-tick${cls}" viewBox="0 0 24 24" role="img" aria-label="${escapeHtml(label)}">${inner}</svg>`;
+const PLUS_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+const CAMERA_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4l-1.8 2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-3.2L15 4H9zm3 4.5a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9zm0 2a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"/></svg>';
+const ATTACH_ICONS = { camera: CAMERA_ICON };
 const SEND_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20.5l18-8.5L3 3.5v6.6l12 1.9-12 1.9z"/></svg>';
 
 /** Ticks of my message: clock while pending or queued, one tick sent, two delivered, two in color read, a red mark when it failed. */
@@ -568,8 +589,13 @@ export function renderComposer(options) {
   const toggles = o.toggles.length
     ? `<div class="ct-toggles">${o.toggles.map((t) => `<label><input type="checkbox" name="${escapeHtml(t.name)}"${t.checked ? ' checked' : ''}> ${escapeHtml(t.label)}</label>`).join('')}</div>`
     : '';
+  // the + and its menu; the file input is a phone's own camera (and the way in with no camera API)
+  const attach = o.attach.length
+    ? `<button type="button" class="ct-attach" aria-haspopup="menu" aria-expanded="false" aria-label="${escapeHtml(s.attach)}" title="${escapeHtml(s.attach)}">${PLUS_ICON}</button><div class="ct-menu" role="menu" hidden>${o.attach
+      .map((a) => `<button type="button" class="ct-menu-item" role="menuitem" data-attach="${a}"><span class="ct-menu-icon ct-menu-icon--${a}">${ATTACH_ICONS[a]}</span>${escapeHtml(s[a])}</button>`).join('')}</div><input type="file" class="ct-file" accept="image/*" capture="environment" tabindex="-1" aria-hidden="true" hidden>`
+    : '';
   // enterkeyhint: a phone's keyboard labels its Enter key "send" when Enter sends
-  return `<div class="ct-composer">${chips}<div class="ct-row"><div class="ct-field"><textarea class="ct-input" rows="1" maxlength="${LIMITS.text}" enterkeyhint="${o.enterSends ? 'send' : 'enter'}" placeholder="${escapeHtml(s.placeholder)}" aria-label="${escapeHtml(s.placeholder)}"></textarea></div><button type="button" class="ct-send" disabled aria-label="${escapeHtml(s.send)}" title="${escapeHtml(s.send)}">${SEND_ICON}</button></div>${toggles}</div>`;
+  return `<div class="ct-composer">${chips}<div class="ct-row">${attach}<div class="ct-field"><textarea class="ct-input" rows="1" maxlength="${LIMITS.text}" enterkeyhint="${o.enterSends ? 'send' : 'enter'}" placeholder="${escapeHtml(s.placeholder)}" aria-label="${escapeHtml(s.placeholder)}"></textarea></div><button type="button" class="ct-send" disabled aria-label="${escapeHtml(s.send)}" title="${escapeHtml(s.send)}">${SEND_ICON}</button></div>${toggles}</div>`;
 }
 
 // The options a browser needs to go on drawing a server-rendered thread the same way.
@@ -586,6 +612,7 @@ function carriedOptions(o) {
   if (o.days !== (o.mode !== 'preview')) out.days = o.days;
   if (o.chips.length) out.chips = o.chips;
   if (o.toggles.length) out.toggles = o.toggles;
+  if (o.attach.length) out.attach = o.attach;
   const strings = Object.fromEntries(Object.entries(o.strings).filter(([k, v]) => v !== DEFAULT_STRINGS[k]));
   if (Object.keys(strings).length) out.strings = strings;
   return Object.keys(out).length ? JSON.stringify(out) : '';

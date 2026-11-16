@@ -467,6 +467,7 @@ export function createThreads(el, options = {}) {
   const freshChat = createChat(fresh, {
     ...chatOpts,
     strings: { ...chatOpts.strings, placeholder: s.newThread },
+    attach: [],   // a photo goes to a thread that exists: onNewThread takes text only
     onSend: (text) => {
       setTimeout(() => {
         freshChat.update({ messages: [] });

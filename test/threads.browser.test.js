@@ -95,7 +95,19 @@ test('Ctrl+Shift+Enter or the Branch button opens a thread derived from the one 
   const input = p.locator(`${team} .ct-th--active .ct-input`);
   await input.fill('And the domain renewal?');
   assert.equal(await branch.isDisabled(), false);
-  const before = await p.locator(`${team} .ct-th--active .ct-msg`).count();
+  // Send's twin: the same box on the same line, the colors swapped (once Send's own transition is over)
+  await p.waitForTimeout(250);
+  const look = await p.evaluate((sel) => {
+    const send = document.querySelector(`${sel} .ct-th--active .ct-send`);
+    const b = document.querySelector(`${sel} .ct-th--active .ct-th-branch`);
+    const r = (n) => n.getBoundingClientRect();
+    const cs = (n) => getComputedStyle(n);
+    return { w: [r(send).width, r(b).width], bottom: [r(send).bottom, r(b).bottom], face: [cs(b).backgroundColor, cs(send).getPropertyValue('--ct-send-icon').trim()], ink: [cs(b).color, cs(send).backgroundColor] };
+  }, team);
+  assert.equal(look.w[0], look.w[1]);
+  assert.equal(look.bottom[0], look.bottom[1]);
+  assert.equal(look.ink[0], look.ink[1], 'the arrows in Send\'s color');
+  const before =await p.locator(`${team} .ct-th--active .ct-msg`).count();
   await p.keyboard.press('Control+Shift+Enter');
   await p.waitForFunction((sel) => document.querySelectorAll(`${sel} .ct-th`).length === 4, team);
   const derived = p.locator(`${team} .ct-th`).last();

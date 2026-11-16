@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import {
   DEFAULT_STRINGS, authorTone, dayKey, dayLabel, escapeHtml, formatTime, isLong, linkify, normalizeChips, normalizeMessage,
-  normalizeToggles, renderComposer, renderList, renderMarkdown, renderMessage, renderPlain, renderThread, renderTyping, renderWhatsApp,
+  normalizeAttach, normalizeToggles, renderComposer, renderList, renderMarkdown, renderMessage, renderPlain, renderThread, renderTyping, renderWhatsApp,
   resolveOptions, safeUrl,
 } from '../src/core.js';
 
@@ -354,4 +354,15 @@ test('fields are cut without splitting an emoji, and missing strings fall back',
   assert.equal(normalizeMessage({ author }).author, 'a'.repeat(79), 'the emoji does not fit whole: it goes whole');
   assert.equal(normalizeMessage({ text: '😀'.repeat(10001) }).text.length, 20000);
   assert.equal(resolveOptions({ strings: { placeholder: undefined, send: null } }).strings.placeholder, 'Message');
+});
+
+test('the + left of the box: only known items, once, and nothing without them', () => {
+  assert.deepEqual(normalizeAttach(['camera', 'camera', 'files', 7]), ['camera']);
+  assert.deepEqual(normalizeAttach('camera'), []);
+  assert.doesNotMatch(renderComposer({}), /ct-attach|ct-file/);
+  const box = renderComposer({ attach: ['camera'], strings: { attach: 'Anexar', camera: 'Câmera' } });
+  assert.match(box, /<div class="ct-row"><button type="button" class="ct-attach" aria-haspopup="menu" aria-expanded="false" aria-label="Anexar" title="Anexar">/);
+  assert.match(box, /<div class="ct-menu" role="menu" hidden><button type="button" class="ct-menu-item" role="menuitem" data-attach="camera">.*Câmera<\/button><\/div>/);
+  assert.match(box, /<input type="file" class="ct-file" accept="image\/\*" capture="environment" tabindex="-1" aria-hidden="true" hidden><div class="ct-field">/);
+  assert.match(renderThread([], { attach: ['camera'] }), /data-options="[^"]*attach/);
 });

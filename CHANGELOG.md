@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-16
+
+### Added
+
+- `attach: ['camera']`: a + left of the box opens a menu with Camera. On a computer the camera opens live over the page (`getUserMedia`); on a phone, or with no camera or the permission refused, the device's own camera through a file input. The photo comes back to a preview with a caption field and Send; `onSend(text, { photo, caption, ... })` gets it as a JPEG `Blob` (at most 2048 px on the long side), and the bubble reads `📷 caption` (or `📷 Photo`) until the app answers. `chat.send(caption, { photo })` and `chat.openCamera()` do the same from code. New strings: `attach`, `camera`, `takePhoto`, `retake`, `caption`, `close`, `photo`; new color `--ct-camera`.
+
+### Changed
+
+- `createThreads`: the Branch button is Send's twin, the same 40 px on the same line, with the colors swapped (Send's icon color as its face, Send's color for the arrows), and fades like Send when there is nothing to branch.
+
 ## [0.5.5] - 2026-11-15
 
 ### Fixed
@@ -128,6 +138,7 @@ First release, extracted from six apps that each drew their own conversation: tw
 - `memoryStore`, `localStore`, `restStore`, the SQLite store and the HTTP handler for Node.
 - `dist/` builds for a script tag (`window.ChatThread`) and for import (`chat-thread.mjs`). CSP-safe markup.
 
-[Unreleased]: https://github.com/rbritta/chat-thread/compare/v0.5.5...HEAD
+[Unreleased]: https://github.com/rbritta/chat-thread/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/rbritta/chat-thread/compare/v0.5.5...v0.6.0
 [0.5.5]: https://github.com/rbritta/chat-thread/compare/v0.5.4...v0.5.5
 [0.5.4]: https://github.com/rbritta/chat-thread/releases/tag/v0.5.4

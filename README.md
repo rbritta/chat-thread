@@ -114,6 +114,7 @@ el.innerHTML = renderThread([{ from: 'me', text: 'Hi, *Alex*! See you ~Wed~ _Thu
 | `copy` | `true` | The Copy button on code blocks. |
 | `chips` | `[]` | Suggestion chips: strings, or `{ label, text?, fill? }`. A chip sends its text; with `fill` it puts it in the box instead. |
 | `toggles` | `[]` | Checkboxes under the box: `{ name, label, checked? }`. Their values go with every message in `meta.toggles`. |
+| `attach` | `[]` | `['camera']` puts a + left of the box with Camera: a photo, a preview with a caption, then `onSend(text, { photo, caption })` with the photo as a JPEG `Blob`. A computer uses the live camera; a phone, its own camera app. |
 | `enterSends` | `true` | Enter sends and Shift+Enter breaks the line. `false` leaves Enter alone (Ctrl+Enter or Cmd+Enter still sends). |
 | `sendState` | none | The state a new message starts with in the store, e.g. `'queued'` while the other side is busy. |
 | `autoScroll` | `true` | Bring a new message into view. |
@@ -124,13 +125,13 @@ el.innerHTML = renderThread([{ from: 'me', text: 'Hi, *Alex*! See you ~Wed~ _Thu
 | `timeZone` | browser | Time zone of the times and days, e.g. `'America/Sao_Paulo'`. Pass it when rendering on a server. |
 | `hour12` | the locale's | `true` for `5:50 PM`, `false` for `17:50`; left out, the locale decides. |
 | `hydrate` | `false` | Take over a thread already in the element (from `renderThread`) instead of drawing it, with the options it was drawn with. |
-| `onSend` | none | `(text, { toggles, message, chat })` after a message is sent. Return a message object to replace the draft (its `id`, `state`...). Throw to mark it failed (`state: 'failed'`, a red mark labelled "Not sent"). |
+| `onSend` | none | `(text, { toggles, message, chat, photo?, caption? })` after a message is sent. Return a message object to replace the draft (its `id`, `state`...). Throw to mark it failed (`state: 'failed'`, a red mark labelled "Not sent"). |
 | `onRemove` | none | `(message)` when × takes back a queued message. |
 | `onChange` | none | Every `send`, `append`, `remove` and `load`. |
 | `onError` | `console.error` | Called when the store or a callback fails. The thread also fires a `chat-error` event. |
 | `now` | `() => new Date()` | The clock, for tests. |
 
-The returned chat has `append(message)`, `updateMessage(id, patch)`, `update({ messages?, typing?, waiting? })`, `setTyping(value)`, `setWaiting(value)`, `send(text)`, `reload()`, `configure(options)`, `focus()`, `messages`, `el`, `composer` and `destroy()`. A message from the other side passed to `append` clears the typing dots and the waiting line. A message whose `id` is already in the thread changes that one instead of adding a copy, so a live feed that echoes what was just sent shows it once. `configure` keeps the text being typed, the toggles' boxes and the focus; its `strings` merge with the ones already given. `destroy` takes out the thread and nothing else in the element.
+The returned chat has `append(message)`, `updateMessage(id, patch)`, `update({ messages?, typing?, waiting? })`, `setTyping(value)`, `setWaiting(value)`, `send(text, { photo }?)`, `openCamera()`, `reload()`, `configure(options)`, `focus()`, `messages`, `el`, `composer` and `destroy()`. A message from the other side passed to `append` clears the typing dots and the waiting line. A message whose `id` is already in the thread changes that one instead of adding a copy, so a live feed that echoes what was just sent shows it once. `configure` keeps the text being typed, the toggles' boxes and the focus; its `strings` merge with the ones already given. `destroy` takes out the thread and nothing else in the element.
 
 `core.js` exports the pure pieces: `renderThread`, `renderList`, `renderMessage`, `renderComposer`, `renderTyping`, `renderMarkdown`, `renderWhatsApp`, `renderPlain`, `normalizeMessage`, `formatTime`, `dayKey`, `dayLabel`, `escapeHtml`, `safeUrl`, `linkify`, `DEFAULT_STRINGS`, `DEFAULTS`, `KINDS`, `STATES` and `LIMITS`.
 

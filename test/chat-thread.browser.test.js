@@ -975,3 +975,48 @@ for (const width of [360, 1200]) {
     });
   }
 }
+
+test('the + opens a menu; Camera takes a photo (here from the file input), the preview sends it with its caption', async (t) => {
+  if (!browser) return t.skip(skip);
+  const { p, ctx, errors } = await page(1200, 900);
+  await installSandbox(p);
+  await p.evaluate(async () => {
+    window.sent = [];
+    // no camera API in the test: the file input is the way in, as on a phone
+    Object.defineProperty(navigator, 'mediaDevices', { value: undefined, configurable: true });
+    const { chat } = await window.sandbox({ attach: ['camera'], onSend: async (text, info) => { window.sent.push({ text, caption: info.caption, type: info.photo?.type, size: info.photo?.size }); return { state: 'sent' }; } });
+    window.box = chat;
+  });
+  const sb = p.locator('.sandbox');
+  const plus = sb.locator('.ct-attach');
+  assert.equal(await sb.locator('.ct-menu').isHidden(), true);
+  await plus.click();
+  assert.equal(await plus.getAttribute('aria-expanded'), 'true');
+  assert.equal(await sb.locator('.ct-menu').isVisible(), true);
+  await p.keyboard.press('Escape');
+  assert.equal(await sb.locator('.ct-menu').isHidden(), true, 'Escape closes the menu');
+  await plus.click();
+  await p.locator('main h1, body').first().click({ position: { x: 5, y: 5 } });
+  assert.equal(await sb.locator('.ct-menu').isHidden(), true, 'a click outside closes it');
+  await plus.click();
+  const chooser = p.waitForEvent('filechooser');
+  await sb.locator('.ct-menu-item[data-attach="camera"]').click();
+  // a 4x3 red PNG
+  const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAQAAAADCAIAAAA7ljmRAAAAEElEQVR4nGP4z8AARww4OQD1MQv1NXv7ggAAAABJRU5ErkJggg==', 'base64');
+  await (await chooser).setFiles({ name: 'shot.png', mimeType: 'image/png', buffer: png });
+  await p.waitForSelector('.ct-cam .ct-cam-shot:not([hidden])');
+  assert.equal(await p.locator('.ct-cam-foot--live').isHidden(), true);
+  await p.locator('.ct-cam-caption').fill('the shelf');
+  await p.locator('.ct-cam-send').click();
+  await p.waitForFunction(() => window.sent.length === 1);
+  const sent = await p.evaluate(() => window.sent[0]);
+  assert.equal(sent.text, '📷 the shelf');
+  assert.equal(sent.caption, 'the shelf');
+  assert.equal(sent.type, 'image/jpeg');
+  assert.ok(sent.size > 0);
+  assert.equal(await p.locator('.ct-cam').count(), 0, 'the camera closes after sending');
+  assert.equal(await sb.locator('.ct-msg--mine').last().textContent().then((s) => s.includes('📷 the shelf')), true);
+  assert.equal(await sb.locator('.ct-input').inputValue(), '', 'the box was not touched');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
