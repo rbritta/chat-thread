@@ -1596,8 +1596,17 @@ function createThreads(el, options = {}) {
   /** Threads keep the order they were opened in: the oldest on top. */
   function place(x) {
     const at = String(x.t.at ?? '');
+    // already in order: moving the node would take the focus (and a phone's keyboard) out of its box
+    if (x.el.parentNode === list) {
+      const atOf = (n) => { const y = n && [...items.values()].find((z) => z.el === n); return y ? String(y.t.at ?? '') : null; };
+      const prev = atOf(x.el.previousElementSibling), next = atOf(x.el.nextElementSibling);
+      if ((prev === null || prev <= at) && (next === null || next > at)) return;
+    }
     const after = [...items.values()].find((y) => y !== x && String(y.t.at ?? '') > at);
-    list.insertBefore(x.el, after ? after.el : null);
+    const ref = after ? after.el : null;
+    const focused = x.el.contains(document.activeElement) ? document.activeElement : null;
+    list.insertBefore(x.el, ref);
+    if (focused && document.activeElement !== focused) focused.focus({ preventScroll: true });
   }
 
   const bottom = (x) => {

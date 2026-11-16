@@ -191,15 +191,21 @@ test('typing in a thread keeps the focus and the text while messages arrive', as
   const input = p.locator(`${team} .ct-th--active .ct-input`);
   await input.click();
   await p.keyboard.type('half a sen');
-  await p.evaluate(() => {
+  const blurs = await p.evaluate(() => {
+    let n = 0;
+    document.activeElement.addEventListener('blur', () => n++);
     const box = window.demoThreads.team;
     box.append('t2', { from: 'other', author: 'Ana', text: 'new', at: new Date().toISOString() });
     box.upsert({ id: 't2', tone: 'busy' });
     box.upsert({ id: 't2', tone: 'wait' });
+    // a page that polls sends the whole header again, its `at` included: the thread is already in place
+    for (const t of box.threads()) box.upsert({ id: t.id, at: t.at, activity: 'Reading' });
+    return n;
   });
   await p.keyboard.type('tence');
   assert.equal(await input.inputValue(), 'half a sentence');
   assert.equal(await p.evaluate(() => document.activeElement.classList.contains('ct-input')), true);
+  assert.equal(blurs, 0, 'the box never lost the focus (a phone would close its keyboard)');
   assert.deepEqual(errors, []);
   await ctx.close();
 });

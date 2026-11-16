@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+## [0.5.5] - 2026-11-15
+
+### Fixed
+
+- `createThreads`: an `upsert` that carries `at` (as a page that polls and sends the whole header again does) no longer moves a thread that is already in order. Moving it took the focus out of the box being typed in, and a phone closed its keyboard.
+
 ## [0.5.4] - 2026-11-14
 
 Project housekeeping: the library itself is unchanged.
@@ -122,5 +128,6 @@ First release, extracted from six apps that each drew their own conversation: tw
 - `memoryStore`, `localStore`, `restStore`, the SQLite store and the HTTP handler for Node.
 - `dist/` builds for a script tag (`window.ChatThread`) and for import (`chat-thread.mjs`). CSP-safe markup.
 
-[Unreleased]: https://github.com/rbritta/chat-thread/compare/v0.5.4...HEAD
+[Unreleased]: https://github.com/rbritta/chat-thread/compare/v0.5.5...HEAD
+[0.5.5]: https://github.com/rbritta/chat-thread/compare/v0.5.4...v0.5.5
 [0.5.4]: https://github.com/rbritta/chat-thread/releases/tag/v0.5.4
