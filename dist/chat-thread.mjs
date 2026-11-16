@@ -1,4 +1,4 @@
-/*! chat-thread v0.6.0 | MIT | https://github.com/rbritta/chat-thread */
+/*! chat-thread v0.7.0 | MIT | https://github.com/rbritta/chat-thread */
 /**
  * Pure helpers for chat-thread: text formats, times and the HTML of a thread as a string.
  * No DOM and no I/O, so a server renders the exact markup the browser does, and every
@@ -46,6 +46,7 @@ const DEFAULT_STRINGS = Object.freeze({
   caption: 'Caption',
   close: 'Close',
   photo: 'Photo',
+  enlarge: 'Enlarge photo',
 });
 
 /** What the + left of the box can offer. Only `camera` for now: take a photo and send it with a caption. */
@@ -412,7 +413,15 @@ function normalizeMessage(input) {
     title: clip(m.title, LIMITS.title).trim(),
     format: FORMATS.includes(m.format) ? m.format : null,
     meta: m.meta && typeof m.meta === 'object' && !Array.isArray(m.meta) ? m.meta : null,
+    image: normalizeImage(m.image),
   };
+}
+
+/** A photo in the bubble: a URL or `{ src, alt? }`. Only http(s) and relative URLs, like links. */
+function normalizeImage(value) {
+  const v = typeof value === 'string' ? { src: value } : value && typeof value === 'object' ? value : null;
+  const src = v && safeUrl(v.src);
+  return src ? { src, alt: clip(v.alt, LIMITS.title).trim() } : null;
 }
 
 /** Suggestion chips: strings or `{ label, text?, fill? }`. `fill` puts the text in the box instead of sending it. */
@@ -495,6 +504,9 @@ function renderMessage(input, options) {
   const title = m.title ? `<p class="ct-title">${escapeHtml(m.title)}</p>` : '';
 
   let body = formatText(m.text, format, { copy: o.copy, strings: s });
+  const image = m.image
+    ? `<button type="button" class="ct-img" aria-label="${escapeHtml(s.enlarge)}" title="${escapeHtml(s.enlarge)}"><img src="${escapeHtml(m.image.src)}" alt="${escapeHtml(m.image.alt)}" loading="lazy" decoding="async"></button>`
+    : '';
   const tag = m.tag || (m.state === 'queued' ? s.queued : '');
   if (tag) body = intoFirst(body, `<span class="ct-tag">${escapeHtml(tag)}</span>`);
 
@@ -512,7 +524,8 @@ function renderMessage(input, options) {
   }
   const id = m.id !== null ? ` data-id="${escapeHtml(String(m.id))}"` : '';
   const day = m.at ? ` data-day="${dayKey(m.at, o)}"` : '';
-  return `<div class="${classes.join(' ')}"${id}${day}>${author}${title}${inner}</div>`;
+  if (image) classes.push('ct-msg--image');
+  return `<div class="${classes.join(' ')}"${id}${day}>${author}${title}${image}${inner}</div>`;
 }
 
 /** The day separator before the first message of each day. */
@@ -658,6 +671,7 @@ let sequence = 0;
 
 const reportError = (err) => console.error('[chat-thread]', err);
 const sameId = (a, b) => String(a) === String(b);
+const CLOSE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
 
 function fragment(html) {
   const tpl = document.createElement('template');
@@ -792,6 +806,7 @@ function createChat(el, options = {}) {
     if (!root) return;
     closeMenu();
     camera.close();
+    viewer.close();
     for (const [type, fn] of listeners) root.removeEventListener(type, fn);
   }
 
@@ -819,13 +834,57 @@ function createChat(el, options = {}) {
   }
 
   /* ---- the camera: live video on a computer, the phone's own camera through the file input ---- */
+  /** A photo in a bubble opens at full size over everything; Escape, the X or a click outside the photo closes it. */
+  const viewer = (() => {
+    let layer = null;
+    let from = null;
+
+    function open(button) {
+      const img = button.querySelector('img');
+      if (!img) return;
+      close();
+      from = button;
+      const s = opts.strings;
+      const alt = img.getAttribute('alt') || '';
+      layer = fragment(`<div class="ct-cam ct-viewer" role="dialog" aria-modal="true" aria-label="${escapeHtml(alt || s.photo)}">
+<div class="ct-cam-top"><button type="button" class="ct-cam-close" aria-label="${escapeHtml(s.close)}" title="${escapeHtml(s.close)}">${CLOSE_ICON}</button><span class="ct-cam-title">${escapeHtml(alt || s.photo)}</span></div>
+<div class="ct-cam-view"><img class="ct-viewer-img" alt="${escapeHtml(alt)}"></div>
+</div>`).firstElementChild;
+      layer.querySelector('.ct-viewer-img').src = img.currentSrc || img.src;
+      layer.addEventListener('click', (ev) => {
+        if (ev.target.closest?.('.ct-cam-close') || !ev.target.closest?.('.ct-viewer-img, .ct-cam-top')) back();
+      });
+      layer.addEventListener('keydown', (ev) => {
+        if (ev.key !== 'Escape') return;
+        ev.preventDefault();
+        ev.stopPropagation();
+        back();
+      });
+      root.appendChild(layer);
+      layer.querySelector('.ct-cam-close').focus();
+    }
+
+    function back() {
+      const b = from;
+      close();
+      if (b?.isConnected) b.focus();
+    }
+
+    function close() {
+      layer?.remove();
+      layer = null;
+      from = null;
+    }
+
+    return { open, close };
+  })();
+
   const camera = (() => {
     let layer = null;
     let stream = null;
     let shot = null;   // the canvas with the photo taken
     let viaFile = false;
     const MAX_SIDE = 2048;
-    const X_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
 
     const stop = () => {
       for (const track of stream?.getTracks?.() ?? []) track.stop();
@@ -837,7 +896,7 @@ function createChat(el, options = {}) {
       const s = opts.strings;
       const sendIcon = root.querySelector('.ct-send')?.innerHTML ?? '';
       layer = fragment(`<div class="ct-cam" role="dialog" aria-modal="true" aria-label="${escapeHtml(s.camera)}">
-<div class="ct-cam-top"><button type="button" class="ct-cam-close" aria-label="${escapeHtml(s.close)}" title="${escapeHtml(s.close)}">${X_ICON}</button><span class="ct-cam-title"></span></div>
+<div class="ct-cam-top"><button type="button" class="ct-cam-close" aria-label="${escapeHtml(s.close)}" title="${escapeHtml(s.close)}">${CLOSE_ICON}</button><span class="ct-cam-title"></span></div>
 <div class="ct-cam-view"><video class="ct-cam-video" autoplay muted playsinline></video><canvas class="ct-cam-shot" hidden></canvas></div>
 <div class="ct-cam-foot ct-cam-foot--live"><button type="button" class="ct-cam-take" aria-label="${escapeHtml(s.takePhoto)}" title="${escapeHtml(s.takePhoto)}"></button></div>
 <div class="ct-cam-foot ct-cam-foot--shot" hidden><button type="button" class="ct-cam-retake">${escapeHtml(s.retake)}</button><div class="ct-field"><textarea class="ct-cam-caption" rows="1" maxlength="2000" placeholder="${escapeHtml(s.caption)}" aria-label="${escapeHtml(s.caption)}"></textarea></div><button type="button" class="ct-send ct-cam-send" aria-label="${escapeHtml(s.send)}" title="${escapeHtml(s.send)}">${sendIcon}</button></div>
@@ -1314,6 +1373,7 @@ function createChat(el, options = {}) {
       // pressed from the keyboard, the button is now disabled: the focus goes back to the box
       input?.focus();
     } else if (is('ct-more')) setOpen(button, button.getAttribute('aria-expanded') !== 'true');
+    else if (is('ct-img')) viewer.open(button);
     else if (is('ct-copy')) copy(button);
     else if (is('ct-remove')) remove(button.closest('.ct-msg'));
     else if (is('ct-chip')) {

@@ -4,6 +4,12 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-16
+
+### Added
+
+- `image` on a message (`'/photos/1.jpg'` or `{ src, alt }`, http(s) or relative URLs only): a thumbnail above the text, at most 280 px (220 px on a phone). A click opens it full size over the page; Escape, the X or a click outside the photo closes it and gives the focus back to the thumbnail. New string: `enlarge`.
+
 ## [0.6.0] - 2026-11-16
 
 ### Added
@@ -138,7 +144,8 @@ First release, extracted from six apps that each drew their own conversation: tw
 - `memoryStore`, `localStore`, `restStore`, the SQLite store and the HTTP handler for Node.
 - `dist/` builds for a script tag (`window.ChatThread`) and for import (`chat-thread.mjs`). CSP-safe markup.
 
-[Unreleased]: https://github.com/rbritta/chat-thread/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/rbritta/chat-thread/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/rbritta/chat-thread/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/rbritta/chat-thread/compare/v0.5.5...v0.6.0
 [0.5.5]: https://github.com/rbritta/chat-thread/compare/v0.5.4...v0.5.5
 [0.5.4]: https://github.com/rbritta/chat-thread/releases/tag/v0.5.4

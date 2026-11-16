@@ -1020,3 +1020,42 @@ test('the + opens a menu; Camera takes a photo (here from the file input), the p
   assert.deepEqual(errors, []);
   await ctx.close();
 });
+
+test('a photo in a bubble: a thumbnail that opens full size; Escape, the X or outside the photo closes it', async (t) => {
+  if (!browser) return t.skip(skip);
+  for (const width of [1200, 360]) {
+    const { p, ctx, errors } = await page(width, 800);
+    await installSandbox(p);
+    // a 600x400 picture, served for the test
+    await p.route('**/test-photo.svg', (r) => r.fulfill({ contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="600" height="400"><rect width="600" height="400" fill="#888"/></svg>' }));
+    await p.evaluate(async () => {
+      const { chat } = await window.sandbox({});
+      chat.append({ id: 'ph', from: 'me', text: 'the shelf', image: { src: '/test-photo.svg', alt: 'shelf' }, state: 'sent', at: new Date().toISOString() });
+    });
+    await p.waitForFunction(() => document.querySelector('.ct-msg[data-id="ph"] .ct-img img')?.complete);
+    const sb = p.locator('.sandbox');
+    const thumb = sb.locator('.ct-msg[data-id="ph"] .ct-img');
+    assert.equal(await thumb.count(), 1);
+    const box = await thumb.boundingBox();
+    assert.ok(box.width <= 282, `thumbnail stays small (${box.width})`);
+    await thumb.click();
+    const view = p.locator('.ct-viewer');
+    assert.equal(await view.isVisible(), true);
+    assert.equal(await p.locator('.ct-viewer .ct-cam-title').textContent(), 'shelf');
+    const big = await p.locator('.ct-viewer-img').boundingBox();
+    assert.ok(big.width > box.width && big.x >= 0 && big.x + big.width <= width && big.y + big.height <= 800, `full size, inside the screen (${JSON.stringify(big)})`);
+    assert.equal(await p.evaluate(() => document.activeElement?.classList.contains('ct-cam-close')), true);
+    await p.keyboard.press('Escape');
+    assert.equal(await view.count(), 0, 'Escape closes it');
+    assert.equal(await p.evaluate(() => document.activeElement?.classList.contains('ct-img')), true, 'the focus goes back to the thumbnail');
+    await thumb.click();
+    await p.locator('.ct-viewer .ct-cam-close').click();
+    assert.equal(await view.count(), 0, 'the X closes it');
+    await thumb.click();
+    await p.mouse.click(5, 790);
+    assert.equal(await view.count(), 0, 'a click outside the photo closes it');
+    assert.equal(await sb.locator('.ct-msg').filter({ hasText: 'the shelf' }).count(), 1, 'nothing was sent');
+    assert.deepEqual(errors.filter((e) => !/Failed to load resource/.test(e)), []);
+    await ctx.close();
+  }
+});

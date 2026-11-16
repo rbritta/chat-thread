@@ -45,6 +45,7 @@ export const DEFAULT_STRINGS = Object.freeze({
   caption: 'Caption',
   close: 'Close',
   photo: 'Photo',
+  enlarge: 'Enlarge photo',
 });
 
 /** What the + left of the box can offer. Only `camera` for now: take a photo and send it with a caption. */
@@ -411,7 +412,15 @@ export function normalizeMessage(input) {
     title: clip(m.title, LIMITS.title).trim(),
     format: FORMATS.includes(m.format) ? m.format : null,
     meta: m.meta && typeof m.meta === 'object' && !Array.isArray(m.meta) ? m.meta : null,
+    image: normalizeImage(m.image),
   };
+}
+
+/** A photo in the bubble: a URL or `{ src, alt? }`. Only http(s) and relative URLs, like links. */
+function normalizeImage(value) {
+  const v = typeof value === 'string' ? { src: value } : value && typeof value === 'object' ? value : null;
+  const src = v && safeUrl(v.src);
+  return src ? { src, alt: clip(v.alt, LIMITS.title).trim() } : null;
 }
 
 /** Suggestion chips: strings or `{ label, text?, fill? }`. `fill` puts the text in the box instead of sending it. */
@@ -494,6 +503,9 @@ export function renderMessage(input, options) {
   const title = m.title ? `<p class="ct-title">${escapeHtml(m.title)}</p>` : '';
 
   let body = formatText(m.text, format, { copy: o.copy, strings: s });
+  const image = m.image
+    ? `<button type="button" class="ct-img" aria-label="${escapeHtml(s.enlarge)}" title="${escapeHtml(s.enlarge)}"><img src="${escapeHtml(m.image.src)}" alt="${escapeHtml(m.image.alt)}" loading="lazy" decoding="async"></button>`
+    : '';
   const tag = m.tag || (m.state === 'queued' ? s.queued : '');
   if (tag) body = intoFirst(body, `<span class="ct-tag">${escapeHtml(tag)}</span>`);
 
@@ -511,7 +523,8 @@ export function renderMessage(input, options) {
   }
   const id = m.id !== null ? ` data-id="${escapeHtml(String(m.id))}"` : '';
   const day = m.at ? ` data-day="${dayKey(m.at, o)}"` : '';
-  return `<div class="${classes.join(' ')}"${id}${day}>${author}${title}${inner}</div>`;
+  if (image) classes.push('ct-msg--image');
+  return `<div class="${classes.join(' ')}"${id}${day}>${author}${title}${image}${inner}</div>`;
 }
 
 /** The day separator before the first message of each day. */

@@ -342,6 +342,22 @@
   --ct-field-border: #2a323d;
   --ct-focus: #4f8f7e;
 }
+.ct-img {
+  display: block;
+  max-width: 100%;
+  margin: 2px 0 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: none;
+  cursor: zoom-in;
+}
+.ct-img img { display: block; max-width: 280px; max-height: 280px; object-fit: cover; }
+@media (max-width: 400px) { .ct-img img { max-width: 220px; max-height: 220px; } }
+.ct-img:focus-visible { outline: 2px solid var(--ct-focus); outline-offset: 2px; }
+.ct-viewer .ct-cam-view { padding-bottom: 16px; cursor: zoom-out; }
+.ct-viewer-img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px; cursor: default; }
 .ct-cam-top { display: flex; align-items: center; gap: 12px; padding: 12px 16px; font-size: 15px; }
 .ct-cam-close { display: grid; place-items: center; width: 40px; height: 40px; padding: 0; border: 0; border-radius: 50%; background: none; color: inherit; cursor: pointer; }
 .ct-cam-close svg { width: 22px; height: 22px; }

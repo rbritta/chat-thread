@@ -150,6 +150,7 @@ The returned chat has `append(message)`, `updateMessage(id, patch)`, `update({ m
   tag,         // a small label before the text: 'waits for the session'
   title,       // a line above the text: 'Note of the day'
   format,      // 'markdown' | 'whatsapp' | 'plain', to override the thread's
+  image,       // a photo above the text: '/photos/1.jpg' or { src, alt }; a click opens it full size
   meta,        // your own object, kept by the stores
 }
 ```

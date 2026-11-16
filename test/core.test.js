@@ -92,7 +92,7 @@ test('times and day labels follow the time zone and the locale', () => {
 
 test('normalizeMessage falls back on bad input instead of throwing', () => {
   const m = normalizeMessage({ id: '7', from: 'admin', kind: 'aside', text: 42, at: 'nope', state: 'lost', alert: 'yes', format: 'html', meta: [1] });
-  assert.deepEqual(m, { id: '7', from: 'other', kind: 'bubble', author: '', text: '42', at: null, state: null, alert: false, tag: '', title: '', format: null, meta: null });
+  assert.deepEqual(m, { id: '7', from: 'other', kind: 'bubble', author: '', text: '42', at: null, state: null, alert: false, tag: '', title: '', format: null, meta: null, image: null });
   assert.equal(normalizeMessage({ kind: 'note' }).kind, 'note');
   assert.equal(normalizeMessage({ id: 3, from: 'me' }).id, 3);
   assert.equal(normalizeMessage(null).from, 'other');
@@ -365,4 +365,16 @@ test('the + left of the box: only known items, once, and nothing without them', 
   assert.match(box, /<div class="ct-menu" role="menu" hidden><button type="button" class="ct-menu-item" role="menuitem" data-attach="camera">.*Câmera<\/button><\/div>/);
   assert.match(box, /<input type="file" class="ct-file" accept="image\/\*" capture="environment" tabindex="-1" aria-hidden="true" hidden><div class="ct-field">/);
   assert.match(renderThread([], { attach: ['camera'] }), /data-options="[^"]*attach/);
+});
+
+test('a photo in the bubble: a button with the picture before the text; only safe URLs', () => {
+  assert.deepEqual(normalizeMessage({ image: '/f/1.jpg' }).image, { src: '/f/1.jpg', alt: '' });
+  assert.deepEqual(normalizeMessage({ image: { src: 'https://x.test/a.jpg', alt: 'shelf' } }).image, { src: 'https://x.test/a.jpg', alt: 'shelf' });
+  assert.equal(normalizeMessage({ image: 'javascript:alert(1)' }).image, null);
+  assert.equal(normalizeMessage({}).image, null);
+  const html = renderMessage({ from: 'me', text: 'the shelf', image: { src: '/f/1.jpg?a=1&b=2', alt: 'x"y' }, at: '2026-11-13T19:00:00Z' }, { ...UTC, strings: { enlarge: 'Ampliar' } });
+  assert.match(html, /class="ct-msg ct-msg--mine ct-msg--image"/);
+  assert.match(html, /<button type="button" class="ct-img" aria-label="Ampliar" title="Ampliar"><img src="\/f\/1\.jpg\?a=1&amp;b=2" alt="x&quot;y" loading="lazy" decoding="async"><\/button><div class="ct-body">/);
+  assert.match(html, /the shelf/);
+  assert.doesNotMatch(renderMessage({ text: 'a' }), /ct-img/);
 });
