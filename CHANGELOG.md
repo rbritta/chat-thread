@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-16
+
+### Added
+
+- A photo sent from the camera shows in its bubble at once, from a small copy (at most 560 px, a `data:` URL, so a CSP with `img-src 'self' data:` allows it). The copy stays on the page: the store and `onSend` never get it, and the saved message's own `image` replaces it.
+- `image` also takes a base64 `data:` URL of a JPEG, PNG, WebP or GIF (never SVG), up to about 1 MB.
+- The live demo shows both: a photo in the Questions thread that opens full size, and the + with Camera in its box.
+
+### Changed
+
+- `image` takes `width` and `height` (the picture's own size): the thumbnail keeps its room while it loads, so the page does not jump when it arrives. Without them it holds at least 80 px on a light placeholder. The camera's preview gives them.
+
 ## [0.7.0] - 2026-11-16
 
 ### Added
@@ -144,7 +156,8 @@ First release, extracted from six apps that each drew their own conversation: tw
 - `memoryStore`, `localStore`, `restStore`, the SQLite store and the HTTP handler for Node.
 - `dist/` builds for a script tag (`window.ChatThread`) and for import (`chat-thread.mjs`). CSP-safe markup.
 
-[Unreleased]: https://github.com/rbritta/chat-thread/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/rbritta/chat-thread/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/rbritta/chat-thread/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/rbritta/chat-thread/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/rbritta/chat-thread/compare/v0.5.5...v0.6.0
 [0.5.5]: https://github.com/rbritta/chat-thread/compare/v0.5.4...v0.5.5

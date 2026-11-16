@@ -984,7 +984,7 @@ test('the + opens a menu; Camera takes a photo (here from the file input), the p
     window.sent = [];
     // no camera API in the test: the file input is the way in, as on a phone
     Object.defineProperty(navigator, 'mediaDevices', { value: undefined, configurable: true });
-    const { chat } = await window.sandbox({ attach: ['camera'], onSend: async (text, info) => { window.sent.push({ text, caption: info.caption, type: info.photo?.type, size: info.photo?.size }); return { state: 'sent' }; } });
+    const { chat } = await window.sandbox({ attach: ['camera'], onSend: async (text, info) => { window.sent.push({ text, caption: info.caption, type: info.photo?.type, size: info.photo?.size, image: info.message.image ?? null }); return { state: 'sent' }; } });
     window.box = chat;
   });
   const sb = p.locator('.sandbox');
@@ -1014,7 +1014,10 @@ test('the + opens a menu; Camera takes a photo (here from the file input), the p
   assert.equal(sent.caption, 'the shelf');
   assert.equal(sent.type, 'image/jpeg');
   assert.ok(sent.size > 0);
+  assert.equal(sent.image, null, 'the preview never goes to the app');
   assert.equal(await p.locator('.ct-cam').count(), 0, 'the camera closes after sending');
+  const shown = await sb.locator('.ct-msg--mine').last().locator('.ct-img img').getAttribute('src');
+  assert.match(shown, /^data:image\/jpeg;base64,/, 'the photo shows in the bubble at once');
   assert.equal(await sb.locator('.ct-msg--mine').last().textContent().then((s) => s.includes('📷 the shelf')), true);
   assert.equal(await sb.locator('.ct-input').inputValue(), '', 'the box was not touched');
   assert.deepEqual(errors, []);

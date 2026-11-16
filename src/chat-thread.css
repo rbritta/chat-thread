@@ -353,8 +353,14 @@
   background: none;
   cursor: zoom-in;
 }
-.ct-img img { display: block; max-width: 280px; max-height: 280px; object-fit: cover; }
-@media (max-width: 400px) { .ct-img img { max-width: 220px; max-height: 220px; } }
+.ct-img img { display: block; height: auto; max-width: 280px; max-height: 280px; object-fit: cover; background: var(--ct-code); }
+/* with its size known, the room is kept while it loads (the width and height already fit 280 px) */
+.ct-img img[width] { max-height: none; }
+.ct-img img:not([width]) { min-width: 80px; min-height: 80px; }
+@media (max-width: 400px) {
+  .ct-img img { max-width: 220px; }
+  .ct-img img:not([width]) { max-height: 220px; }
+}
 .ct-img:focus-visible { outline: 2px solid var(--ct-focus); outline-offset: 2px; }
 .ct-viewer .ct-cam-view { padding-bottom: 16px; cursor: zoom-out; }
 .ct-viewer-img { display: block; max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 4px; cursor: default; }

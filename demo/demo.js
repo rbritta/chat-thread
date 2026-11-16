@@ -68,7 +68,7 @@ function threads(name, list, options) {
 }
 window.demoThreads = {
   team: threads('team', threadsOf('threadsTeam'), { people: [{ name: 'You' }, { name: 'Ana' }], chat: { author: 'Ana', colorAuthors: true, strings: { placeholder: 'Message' } } }),
-  session: threads('session', threadsOf('threadsSession'), { mode: 'questions', chat: { author: 'Session 2' } }),
+  session: threads('session', threadsOf('threadsSession'), { mode: 'questions', chat: { author: 'Session 2', attach: ['camera'] } }),
 };
 
 // The theme switch at the top is theme.js: the threads with theme 'auto' follow it with CSS only.

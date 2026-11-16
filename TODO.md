@@ -6,7 +6,8 @@ Ideas that are not built yet, roughly in order. Open an issue before starting a 
 - [ ] Stick to the bottom while new messages arrive, with a "new messages" pill when scrolled up.
 - [ ] Live updates from the HTTP handler (Server-Sent Events) and a `poll` option for `restStore`.
 - [ ] Older messages on scroll up (`load({ before })` is already in the server store).
-- [ ] Attachments: an image or a file card inside the bubble.
+- [x] A photo inside the bubble (`image`, 0.7.0) and the camera behind the + (`attach`, 0.6.0).
+- [ ] More behind the +: a photo from the gallery, a file card in the bubble.
 - [ ] Reply to a message (the quoted bubble on top) and reactions.
 - [ ] A `system` kind: a short centered line ("Dana joined", "Moved to Friday").
 - [ ] Markdown tables and quotes.

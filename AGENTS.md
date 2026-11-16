@@ -74,7 +74,7 @@ export function Transcript({ messages }) {
 
 ```js
 // a message, as normalizeMessage returns it and the stores keep it
-{ id, from, kind /* bubble|note */, author, text, at /* ISO */, state /* pending|queued|sent|delivered|read|failed|null */, alert, tag, title, format, meta }
+{ id, from, kind /* bubble|note */, author, text, at /* ISO */, state /* pending|queued|sent|delivered|read|failed|null */, alert, tag, title, format, meta, image /* { src, alt, width?, height? } | null */ }
 // browser store
 { load() -> { messages } | messages[], send(draft) -> message, remove?(id) }
 // server store (thread = any id: 'support', 'user-42', 'task:17')

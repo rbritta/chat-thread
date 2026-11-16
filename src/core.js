@@ -416,11 +416,26 @@ export function normalizeMessage(input) {
   };
 }
 
+/** A picture inlined as base64 (what a camera preview makes), up to 1 MB. Never SVG: it can carry script. */
+const dataImage = (value) => (typeof value === 'string' && value.length <= 1_400_000 && /^data:image\/(?:jpeg|png|webp|gif);base64,[A-Za-z0-9+/]+=*$/.test(value) ? value : null);
+
+/** The thumbnail's width and height attributes: the picture's size brought into 280 px, so its room is kept while it loads. */
+function thumbSize({ width, height }) {
+  if (!width) return '';
+  const k = Math.min(1, 280 / Math.max(width, height));
+  return ` width="${Math.max(1, Math.round(width * k))}" height="${Math.max(1, Math.round(height * k))}"`;
+}
+
 /** A photo in the bubble: a URL or `{ src, alt? }`. Only http(s) and relative URLs, like links. */
 function normalizeImage(value) {
   const v = typeof value === 'string' ? { src: value } : value && typeof value === 'object' ? value : null;
-  const src = v && safeUrl(v.src);
-  return src ? { src, alt: clip(v.alt, LIMITS.title).trim() } : null;
+  const src = v && (safeUrl(v.src) || dataImage(v.src));
+  if (!src) return null;
+  const image = { src, alt: clip(v.alt, LIMITS.title).trim() };
+  // its size, when known, keeps the room for it while it loads
+  const side = (n) => (Number.isInteger(n) && n > 0 && n <= 20000 ? n : null);
+  if (side(v.width) && side(v.height)) Object.assign(image, { width: v.width, height: v.height });
+  return image;
 }
 
 /** Suggestion chips: strings or `{ label, text?, fill? }`. `fill` puts the text in the box instead of sending it. */
@@ -504,7 +519,7 @@ export function renderMessage(input, options) {
 
   let body = formatText(m.text, format, { copy: o.copy, strings: s });
   const image = m.image
-    ? `<button type="button" class="ct-img" aria-label="${escapeHtml(s.enlarge)}" title="${escapeHtml(s.enlarge)}"><img src="${escapeHtml(m.image.src)}" alt="${escapeHtml(m.image.alt)}" loading="lazy" decoding="async"></button>`
+    ? `<button type="button" class="ct-img" aria-label="${escapeHtml(s.enlarge)}" title="${escapeHtml(s.enlarge)}"><img src="${escapeHtml(m.image.src)}" alt="${escapeHtml(m.image.alt)}"${thumbSize(m.image)} loading="lazy" decoding="async"></button>`
     : '';
   const tag = m.tag || (m.state === 'queued' ? s.queued : '');
   if (tag) body = intoFirst(body, `<span class="ct-tag">${escapeHtml(tag)}</span>`);

@@ -372,6 +372,12 @@ test('a photo in the bubble: a button with the picture before the text; only saf
   assert.deepEqual(normalizeMessage({ image: { src: 'https://x.test/a.jpg', alt: 'shelf' } }).image, { src: 'https://x.test/a.jpg', alt: 'shelf' });
   assert.equal(normalizeMessage({ image: 'javascript:alert(1)' }).image, null);
   assert.equal(normalizeMessage({}).image, null);
+  assert.deepEqual(normalizeMessage({ image: { src: '/a.jpg', width: 480, height: 640 } }).image, { src: '/a.jpg', alt: '', width: 480, height: 640 });
+  assert.deepEqual(normalizeMessage({ image: { src: '/a.jpg', width: '480', height: -1 } }).image, { src: '/a.jpg', alt: '' });
+  assert.match(renderMessage({ image: { src: '/a.jpg', width: 480, height: 640 } }), /<img src="\/a\.jpg" alt="" width="210" height="280" loading="lazy"/);
+  assert.equal(normalizeMessage({ image: 'data:image/jpeg;base64,/9j/4AAQ==' }).image.src, 'data:image/jpeg;base64,/9j/4AAQ==', 'a camera preview');
+  assert.equal(normalizeMessage({ image: 'data:image/svg+xml;base64,PHN2Zz4=' }).image, null, 'never SVG');
+  assert.equal(normalizeMessage({ image: 'data:image/png;base64,AA"><script>' }).image, null);
   const html = renderMessage({ from: 'me', text: 'the shelf', image: { src: '/f/1.jpg?a=1&b=2', alt: 'x"y' }, at: '2026-11-13T19:00:00Z' }, { ...UTC, strings: { enlarge: 'Ampliar' } });
   assert.match(html, /class="ct-msg ct-msg--mine ct-msg--image"/);
   assert.match(html, /<button type="button" class="ct-img" aria-label="Ampliar" title="Ampliar"><img src="\/f\/1\.jpg\?a=1&amp;b=2" alt="x&quot;y" loading="lazy" decoding="async"><\/button><div class="ct-body">/);

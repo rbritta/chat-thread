@@ -1,4 +1,4 @@
-/*! chat-thread v0.7.0 | MIT | https://github.com/rbritta/chat-thread */
+/*! chat-thread v0.8.0 | MIT | https://github.com/rbritta/chat-thread */
 /**
  * Pure helpers for chat-thread: text formats, times and the HTML of a thread as a string.
  * No DOM and no I/O, so a server renders the exact markup the browser does, and every
@@ -417,11 +417,26 @@ function normalizeMessage(input) {
   };
 }
 
+/** A picture inlined as base64 (what a camera preview makes), up to 1 MB. Never SVG: it can carry script. */
+const dataImage = (value) => (typeof value === 'string' && value.length <= 1_400_000 && /^data:image\/(?:jpeg|png|webp|gif);base64,[A-Za-z0-9+/]+=*$/.test(value) ? value : null);
+
+/** The thumbnail's width and height attributes: the picture's size brought into 280 px, so its room is kept while it loads. */
+function thumbSize({ width, height }) {
+  if (!width) return '';
+  const k = Math.min(1, 280 / Math.max(width, height));
+  return ` width="${Math.max(1, Math.round(width * k))}" height="${Math.max(1, Math.round(height * k))}"`;
+}
+
 /** A photo in the bubble: a URL or `{ src, alt? }`. Only http(s) and relative URLs, like links. */
 function normalizeImage(value) {
   const v = typeof value === 'string' ? { src: value } : value && typeof value === 'object' ? value : null;
-  const src = v && safeUrl(v.src);
-  return src ? { src, alt: clip(v.alt, LIMITS.title).trim() } : null;
+  const src = v && (safeUrl(v.src) || dataImage(v.src));
+  if (!src) return null;
+  const image = { src, alt: clip(v.alt, LIMITS.title).trim() };
+  // its size, when known, keeps the room for it while it loads
+  const side = (n) => (Number.isInteger(n) && n > 0 && n <= 20000 ? n : null);
+  if (side(v.width) && side(v.height)) Object.assign(image, { width: v.width, height: v.height });
+  return image;
 }
 
 /** Suggestion chips: strings or `{ label, text?, fill? }`. `fill` puts the text in the box instead of sending it. */
@@ -505,7 +520,7 @@ function renderMessage(input, options) {
 
   let body = formatText(m.text, format, { copy: o.copy, strings: s });
   const image = m.image
-    ? `<button type="button" class="ct-img" aria-label="${escapeHtml(s.enlarge)}" title="${escapeHtml(s.enlarge)}"><img src="${escapeHtml(m.image.src)}" alt="${escapeHtml(m.image.alt)}" loading="lazy" decoding="async"></button>`
+    ? `<button type="button" class="ct-img" aria-label="${escapeHtml(s.enlarge)}" title="${escapeHtml(s.enlarge)}"><img src="${escapeHtml(m.image.src)}" alt="${escapeHtml(m.image.alt)}"${thumbSize(m.image)} loading="lazy" decoding="async"></button>`
     : '';
   const tag = m.tag || (m.state === 'queued' ? s.queued : '');
   if (tag) body = intoFirst(body, `<span class="ct-tag">${escapeHtml(tag)}</span>`);
@@ -969,12 +984,27 @@ function createChat(el, options = {}) {
       stop();
     }
 
+    /** A light copy for the bubble (a data: URL, so a strict CSP with `img-src 'self' data:` shows it). */
+    function thumbnail(source) {
+      try {
+        const scale = Math.min(1, 560 / Math.max(source.width, source.height));
+        const c = document.createElement('canvas');
+        c.width = Math.round(source.width * scale);
+        c.height = Math.round(source.height * scale);
+        c.getContext('2d').drawImage(source, 0, 0, c.width, c.height);
+        return { src: c.toDataURL('image/jpeg', 0.8), width: c.width, height: c.height };
+      } catch {
+        return null;
+      }
+    }
+
     async function deliver() {
       if (!shot) return;
       const caption = q('.ct-cam-caption').value.trim();
       const photo = await new Promise((resolve) => shot.toBlob(resolve, 'image/jpeg', 0.85));
+      const preview = thumbnail(shot);
       close();
-      if (photo) send(caption, { photo });
+      if (photo) send(caption, { photo, preview });
       input?.focus();
     }
 
@@ -1218,7 +1248,7 @@ function createChat(el, options = {}) {
   }
 
   /** Sends the box's text, or `raw`; with `photo` (a Blob), `raw` is its caption and may be empty. */
-  async function send(raw, { photo = null } = {}) {
+  async function send(raw, { photo = null, preview = null } = {}) {
     const fromBox = raw === undefined && !photo;
     const value = String(fromBox ? input?.value ?? '' : raw ?? '').replace(/\s+$/, '').replace(/^\n+/, '');
     if ((!value.trim() && !photo) || opts.mode !== 'chat') return null;
@@ -1233,7 +1263,9 @@ function createChat(el, options = {}) {
       input.value = '';
       grow();
     }
-    const temp = normalizeMessage({ ...draft, id: `tmp-${++sequence}`, state: 'pending' });
+    // the photo just taken shows in the bubble at once; it stays on this page and never goes to the store
+    const local = photo && preview ? { image: { ...preview, alt: value.trim() || opts.strings.photo } } : {};
+    const temp = normalizeMessage({ ...draft, ...local, id: `tmp-${++sequence}`, state: 'pending' });
     messages.push(temp);
     insert(temp);
     let saved = null;
@@ -1248,7 +1280,7 @@ function createChat(el, options = {}) {
       fail(err);
       return null;
     }
-    const final = settleDraft(temp, { ...draft, ...(saved || {}), id: saved?.id ?? temp.id.replace('tmp-', 'local-') });
+    const final = settleDraft(temp, { ...draft, ...local, ...(saved || {}), id: saved?.id ?? temp.id.replace('tmp-', 'local-') });
     emit({ type: 'send', message: final, toggles });
     return final;
   }

@@ -114,7 +114,7 @@ el.innerHTML = renderThread([{ from: 'me', text: 'Hi, *Alex*! See you ~Wed~ _Thu
 | `copy` | `true` | The Copy button on code blocks. |
 | `chips` | `[]` | Suggestion chips: strings, or `{ label, text?, fill? }`. A chip sends its text; with `fill` it puts it in the box instead. |
 | `toggles` | `[]` | Checkboxes under the box: `{ name, label, checked? }`. Their values go with every message in `meta.toggles`. |
-| `attach` | `[]` | `['camera']` puts a + left of the box with Camera: a photo, a preview with a caption, then `onSend(text, { photo, caption })` with the photo as a JPEG `Blob`. A computer uses the live camera; a phone, its own camera app. |
+| `attach` | `[]` | `['camera']` puts a + left of the box with Camera: a photo, a preview with a caption, then `onSend(text, { photo, caption })` with the photo as a JPEG `Blob`. The bubble shows the photo at once (a small copy that stays on the page); give the saved message an `image` to keep it. A computer uses the live camera; a phone, its own camera app. |
 | `enterSends` | `true` | Enter sends and Shift+Enter breaks the line. `false` leaves Enter alone (Ctrl+Enter or Cmd+Enter still sends). |
 | `sendState` | none | The state a new message starts with in the store, e.g. `'queued'` while the other side is busy. |
 | `autoScroll` | `true` | Bring a new message into view. |
@@ -150,7 +150,7 @@ The returned chat has `append(message)`, `updateMessage(id, patch)`, `update({ m
   tag,         // a small label before the text: 'waits for the session'
   title,       // a line above the text: 'Note of the day'
   format,      // 'markdown' | 'whatsapp' | 'plain', to override the thread's
-  image,       // a photo above the text: '/photos/1.jpg' or { src, alt }; a click opens it full size
+  image,       // a photo above the text: '/photos/1.jpg', './a.jpg' or { src, alt, width?, height? }; a click opens it full size
   meta,        // your own object, kept by the stores
 }
 ```

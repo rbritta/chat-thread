@@ -327,12 +327,27 @@ export function createChat(el, options = {}) {
       stop();
     }
 
+    /** A light copy for the bubble (a data: URL, so a strict CSP with `img-src 'self' data:` shows it). */
+    function thumbnail(source) {
+      try {
+        const scale = Math.min(1, 560 / Math.max(source.width, source.height));
+        const c = document.createElement('canvas');
+        c.width = Math.round(source.width * scale);
+        c.height = Math.round(source.height * scale);
+        c.getContext('2d').drawImage(source, 0, 0, c.width, c.height);
+        return { src: c.toDataURL('image/jpeg', 0.8), width: c.width, height: c.height };
+      } catch {
+        return null;
+      }
+    }
+
     async function deliver() {
       if (!shot) return;
       const caption = q('.ct-cam-caption').value.trim();
       const photo = await new Promise((resolve) => shot.toBlob(resolve, 'image/jpeg', 0.85));
+      const preview = thumbnail(shot);
       close();
-      if (photo) send(caption, { photo });
+      if (photo) send(caption, { photo, preview });
       input?.focus();
     }
 
@@ -576,7 +591,7 @@ export function createChat(el, options = {}) {
   }
 
   /** Sends the box's text, or `raw`; with `photo` (a Blob), `raw` is its caption and may be empty. */
-  async function send(raw, { photo = null } = {}) {
+  async function send(raw, { photo = null, preview = null } = {}) {
     const fromBox = raw === undefined && !photo;
     const value = String(fromBox ? input?.value ?? '' : raw ?? '').replace(/\s+$/, '').replace(/^\n+/, '');
     if ((!value.trim() && !photo) || opts.mode !== 'chat') return null;
@@ -591,7 +606,9 @@ export function createChat(el, options = {}) {
       input.value = '';
       grow();
     }
-    const temp = normalizeMessage({ ...draft, id: `tmp-${++sequence}`, state: 'pending' });
+    // the photo just taken shows in the bubble at once; it stays on this page and never goes to the store
+    const local = photo && preview ? { image: { ...preview, alt: value.trim() || opts.strings.photo } } : {};
+    const temp = normalizeMessage({ ...draft, ...local, id: `tmp-${++sequence}`, state: 'pending' });
     messages.push(temp);
     insert(temp);
     let saved = null;
@@ -606,7 +623,7 @@ export function createChat(el, options = {}) {
       fail(err);
       return null;
     }
-    const final = settleDraft(temp, { ...draft, ...(saved || {}), id: saved?.id ?? temp.id.replace('tmp-', 'local-') });
+    const final = settleDraft(temp, { ...draft, ...local, ...(saved || {}), id: saved?.id ?? temp.id.replace('tmp-', 'local-') });
     emit({ type: 'send', message: final, toggles });
     return final;
   }
