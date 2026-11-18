@@ -292,3 +292,43 @@ test('showing earlier messages rises them in; folding back fades them out first'
   assert.deepEqual(errors, []);
   await ctx.close();
 });
+
+test('newThreads: false leaves out every way to start a thread, and rename: false the pencil', async (t) => {
+  if (!browser) return t.skip(skip);
+  const { p, ctx, errors } = await page();
+  const out = await p.evaluate(async () => {
+    const { createThreads } = await import('/src/chat-thread.js');
+    const el = document.createElement('div');
+    document.querySelector('[data-threads="team"]').after(el);
+    const at = new Date().toISOString();
+    const started = [];
+    const box = createThreads(el, {
+      mode: 'questions', newThreads: false, rename: false, showResolved: true,
+      threads: [{ id: 'q', n: 2, title: 'Authorization', at, tone: 'wait', open: true, messages: [{ id: 1, from: 'other', author: 'env3', text: 'May I?', at }] }],
+      onNewThread: (text) => { started.push(text); return { id: `n${started.length}`, at, messages: [] }; },
+    });
+    const visibleIn = (sel) => [...el.querySelectorAll(sel)].filter((n) => n.offsetParent !== null).length;
+    const input = el.querySelector('.ct-th--active .ct-input');
+    input.value = 'Go ahead';
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+    await new Promise((r) => setTimeout(r, 50));
+    const open = {
+      branch: el.querySelectorAll('.ct-th-branch').length,
+      pencil: el.querySelectorAll('.ct-th-rename').length,
+      resolve: el.querySelectorAll('.ct-th-resolve').length,
+      boxes: visibleIn('.ct-composer'),
+    };
+    // with the only thread closed there is no box at the bottom to start one
+    el.querySelector('.ct-th-toggle').click();
+    const closed = { boxes: visibleIn('.ct-composer'), bottom: el.querySelector('.ct-th-new').hidden, threads: el.querySelectorAll('.ct-th').length };
+    box.destroy();
+    el.remove();
+    return { open, closed, started };
+  });
+  assert.deepEqual(out.open, { branch: 0, pencil: 0, resolve: 1, boxes: 1 }, 'the box to answer stays; Branch and the pencil do not');
+  assert.deepEqual(out.closed, { boxes: 0, bottom: true, threads: 1 });
+  assert.deepEqual(out.started, [], 'Ctrl+Shift+Enter did not start a thread');
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});

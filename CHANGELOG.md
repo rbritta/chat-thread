@@ -4,6 +4,13 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-17
+
+### Added
+
+- `createThreads({ newThreads: false })` leaves out every way to start a thread: the Branch button, Ctrl+Shift+Enter (the box keeps the key) and the box at the bottom. For an app that shows threads the person answers but cannot open, such as one question of an AI session in a side panel.
+- `createThreads({ rename: false })` leaves out the pencil, for threads whose title the app owns. `rename()` from code still works.
+
 ## [0.8.0] - 2026-11-16
 
 ### Added
@@ -156,7 +163,8 @@ First release, extracted from six apps that each drew their own conversation: tw
 - `memoryStore`, `localStore`, `restStore`, the SQLite store and the HTTP handler for Node.
 - `dist/` builds for a script tag (`window.ChatThread`) and for import (`chat-thread.mjs`). CSP-safe markup.
 
-[Unreleased]: https://github.com/rbritta/chat-thread/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/rbritta/chat-thread/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/rbritta/chat-thread/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/rbritta/chat-thread/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/rbritta/chat-thread/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/rbritta/chat-thread/compare/v0.5.5...v0.6.0

@@ -68,6 +68,7 @@ export function Transcript({ messages }) {
 - One app thread (an issue, a question, a subject) is one entry of `threads`; map it in one small function, like messages: `{ id, n?, title?, titleBy?, titleByAI?, at, status: "open" | "resolved", resolvedBy?, tone: "wait" | "busy" | "idle", label?, activity?, origin?, parent?, participants: [{ name }], messages }`.
 - Keep the thread list in step with `upsert(patch)` (it adds what is new and changes only the fields given; `messages` replaces the list through the chat's `update`), `append` for one message, `resolve`/`reopen` when the other side decides. Do not redraw the container on a poll: that loses the focus and the text being typed.
 - `onNewThread(text, parentId)` must return the new thread (or a promise of it). It is called from the bottom box (`parentId` null) and from Branch.
+- A screen that shows threads the person answers but cannot start (one question of a session in a side panel) passes `newThreads: false`: no Branch, no Ctrl+Shift+Enter, no bottom box. `rename: false` drops the pencil when the app owns the title. Both are read once, at `createThreads`.
 - Use `mode: "questions"` when the other side is an AI session with numbered questions; `conversation` everywhere else.
 
 ## Shapes

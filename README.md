@@ -206,6 +206,7 @@ box.rename('t2', 'Hosting charged twice', 'Assistant', true);       // an AI's t
 - **Order:** threads stay in the order they were opened (`at`). A resolved thread folds into one line in its place, hidden behind "Show N resolved" at the top.
 - **One message box:** only the active thread (the open one you last touched) has a box. With none open, a box at the bottom starts a new thread; what you type there goes to the new thread.
 - **Branch:** the button right of Send, or Ctrl+Shift+Enter, opens a new thread with the text instead of sending it, derived from the thread you are in (`onNewThread(text, parentId)`; the header shows where it came from).
+- **Answer only:** `newThreads: false` leaves out the Branch button, Ctrl+Shift+Enter and the box at the bottom, for threads the person answers but cannot start (one question of an AI session in a side panel, a history). `rename: false` leaves out the pencil when the title is the app's; `rename()` from code still works.
 - **Title:** what someone gave (`title`, renamed with the pencil or `rename()`); without one, the first line of the first message. `titleByAI` marks a title an AI gave.
 - **State:** `tone` is `wait` (your turn), `busy` (the other side is working: typing dots, and `activity` above the box), or `idle`. `label` replaces the words.
 - **Headers:** `mode: 'conversation'` (the default: avatars, title, who, how many, when, for people with or without an AI in between) or `mode: 'questions'` (a badge `Qn` colored by the state, with `n` and `origin`, for AI sessions). `header: (thread, { strings, preview, when, escapeHtml, headers }) => html` draws your own; call `headers.conversation(thread, ctx)` inside it to start from the default.
@@ -301,7 +302,7 @@ npm run build          # dist/ (commit it: script-tag users take it from the rep
 npm run screenshots    # regenerates docs/*.png from the demo
 ```
 
-Node 22.5 or newer (for `node:sqlite` in the tests). 86 tests: 44 run in Node (the core, the server, the release notes) and 42 in a real browser. The browser tests pin the language, the time zone and the clock, so they give the same result on any machine; with no browser installed they skip and say why (CI makes that an error). Why the library looks the way it does: [docs/extraction.md](docs/extraction.md).
+Node 22.5 or newer (for `node:sqlite` in the tests). 91 tests: 46 run in Node (the core, the server, the release notes) and 45 in a real browser. The browser tests pin the language, the time zone and the clock, so they give the same result on any machine; with no browser installed they skip and say why (CI makes that an error). Why the library looks the way it does: [docs/extraction.md](docs/extraction.md).
 
 ## Contributing
 

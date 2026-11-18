@@ -14,7 +14,8 @@
  * place, hidden behind "Show N resolved" at the top. There is one message box: the one of the
  * active thread (the last one opened or touched). Its Branch button, right of Send, or
  * Ctrl+Shift+Enter opens a new thread with the text, derived from that one. With no thread
- * open, a box at the bottom starts a new thread.
+ * open, a box at the bottom starts a new thread. `newThreads: false` leaves all three out, for
+ * an app that shows threads the person cannot start (one question in a side panel, a history).
  *
  * Two headers ship: `conversation` (the default: avatars, title, who and when, for people
  * talking to people, with or without an AI in between) and `questions` (a numbered badge
@@ -121,14 +122,19 @@ const near = (list) => !list || list.scrollHeight - list.scrollTop - list.client
 /**
  * Draws the threads in `el` and returns their controller. Options: `threads`, `mode`
  * (`conversation` or `questions`), `header`, `theme`, `strings`, `chat` (options for every
- * thread's createChat: author, locale, timeZone, strings...), `showResolved`, and the callbacks
- * `latest` (how many of the last messages a thread shows before "Show N earlier"; 2, 0 shows all),
- * `onSend(id, text, info)`, `onNewThread(text, parentId)` (returns the new thread, or a promise
- * of it), `onResolve(id)`, `onReopen(id)`, `onRename(id, title)`, `onError(err)`.
+ * thread's createChat: author, locale, timeZone, strings...), `showResolved`, `latest` (how many
+ * of the last messages a thread shows before "Show N earlier"; 2, 0 shows all), `newThreads`
+ * (false: no Branch button, no Ctrl+Shift+Enter, no box at the bottom), `rename` (false: no
+ * pencil), and the callbacks `onSend(id, text, info)`, `onNewThread(text, parentId)` (returns the
+ * new thread, or a promise of it), `onResolve(id)`, `onReopen(id)`, `onRename(id, title)`,
+ * `onError(err)`.
  */
 export function createThreads(el, options = {}) {
   if (!el) throw new Error('createThreads: no element');
-  const o = { mode: 'conversation', theme: options.chat?.theme || 'dark', showResolved: false, latest: 2, ...options };
+  const o = { mode: 'conversation', theme: options.chat?.theme || 'dark', showResolved: false, latest: 2, newThreads: true, rename: true, ...options };
+  // what the person may do besides talking: start threads (Branch, Ctrl+Shift+Enter, the bottom box) and rename them
+  const canStart = o.newThreads !== false;
+  const canRename = o.rename !== false;
   const s = { ...THREAD_STRINGS, ...o.strings };
   const chatOpts = { autoScroll: false, ...o.chat, theme: o.theme };
   const report = o.onError || ((err) => console.error('[chat-thread]', err));
@@ -170,13 +176,13 @@ export function createThreads(el, options = {}) {
     more.textContent = el.classList.contains('ct-threads--hide-resolved') ? fill(k === 1 ? s.showResolvedOne : s.showResolved, { count: k }) : s.hideResolved;
   }
 
-  /** One message box: the active thread's; with none open, the one at the bottom. */
+  /** One message box: the active thread's; with none open, the one at the bottom (when threads can be started). */
   function activate(x) {
     if (x && (!x.open || !items.has(x.t.id))) x = null;
     if (!x) x = [...items.values()].filter((y) => y.open).pop() || null;
     active = x;
     for (const y of items.values()) y.el.classList.toggle('ct-th--active', y === x);
-    fresh.hidden = !!x;
+    fresh.hidden = !!x || !canStart;
   }
 
   function draw(x) {
@@ -188,7 +194,7 @@ export function createThreads(el, options = {}) {
     x.toggle.innerHTML = drawHeader(t);
     x.toggle.setAttribute('aria-expanded', String(x.open));
     const act = (label, cls, icon) => `<button type="button" class="ct-th-ic ${cls}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">${icon}</button>`;
-    x.acts.innerHTML = act(s.rename, 'ct-th-rename', ICONS.rename) + (resolved ? act(s.reopen, 'ct-th-reopen', ICONS.reopen) : act(s.resolve, 'ct-th-resolve', ICONS.resolve)) + ICONS.chevron;
+    x.acts.innerHTML = (canRename ? act(s.rename, 'ct-th-rename', ICONS.rename) : '') + (resolved ? act(s.reopen, 'ct-th-reopen', ICONS.reopen) : act(s.resolve, 'ct-th-resolve', ICONS.resolve)) + ICONS.chevron;
     const busy = !resolved && t.tone === 'busy';
     if (x.typing !== busy) {
       x.typing = busy;
@@ -196,7 +202,7 @@ export function createThreads(el, options = {}) {
     }
     x.activity.textContent = busy && t.activity ? `${t.activity}…` : '';
     x.activity.hidden = !(busy && t.activity);
-    branchButton(x.el, () => x.t);
+    if (canStart) branchButton(x.el, () => x.t);
     fold(x);
     count();
   }
@@ -317,7 +323,7 @@ export function createThreads(el, options = {}) {
   }
 
   async function start(text, parent) {
-    if (typeof o.onNewThread !== 'function') return;
+    if (!canStart || typeof o.onNewThread !== 'function') return;
     try {
       const t = await o.onNewThread(text, parent ? parent.id : null);
       if (!t || destroyed) return;
@@ -421,7 +427,7 @@ export function createThreads(el, options = {}) {
     if (!node || !el.contains(node)) return;
     const x = [...items.values()].find((y) => y.el === node);
     if (!x || !x.head.contains(target)) return;
-    if (target.closest('.ct-th-rename')) return rename(x);
+    if (canRename && target.closest('.ct-th-rename')) return rename(x);
     if (target.closest('.ct-th-resolve')) {
       api.resolve(x.t.id);
       try { o.onResolve?.(x.t.id); } catch (err) { report(err); }
@@ -446,9 +452,9 @@ export function createThreads(el, options = {}) {
     const b = ev.target.closest('.ct-composer')?.querySelector('.ct-th-branch');
     if (b) b.disabled = !ev.target.value.trim();
   });
-  // capture: before the box's own Enter, which would send it to this thread
+  // capture: before the box's own Enter, which would send it to this thread (with no new threads, the box keeps the key)
   el.addEventListener('keydown', (ev) => {
-    if (ev.key !== 'Enter' || !ev.shiftKey || !(ev.ctrlKey || ev.metaKey) || !ev.target.classList?.contains('ct-input')) return;
+    if (!canStart || ev.key !== 'Enter' || !ev.shiftKey || !(ev.ctrlKey || ev.metaKey) || !ev.target.classList?.contains('ct-input')) return;
     ev.preventDefault();
     ev.stopImmediatePropagation();
     branch(ev.target.closest('.ct-th') || fresh);
@@ -463,8 +469,8 @@ export function createThreads(el, options = {}) {
 
   for (const t of o.threads || []) add(t, t.open ?? (t.status !== 'resolved' && t.tone !== 'idle'));
 
-  // with no thread open: this box starts one (the text goes to the new thread, not here)
-  const freshChat = createChat(fresh, {
+  // with no thread open: this box starts one (the text goes to the new thread, not here); none when threads cannot start
+  const freshChat = canStart && createChat(fresh, {
     ...chatOpts,
     strings: { ...chatOpts.strings, placeholder: s.newThread },
     attach: [],   // a photo goes to a thread that exists: onNewThread takes text only
@@ -567,7 +573,7 @@ export function createThreads(el, options = {}) {
     destroy() {
       destroyed = true;
       for (const x of items.values()) x.chat.destroy();
-      freshChat.destroy();
+      if (freshChat) freshChat.destroy();
       items.clear();
       el.innerHTML = '';
       el.classList.remove('ct-threads', 'ct-threads--hide-resolved', ...THEMES.map((t) => `ct-threads--${t}`));
