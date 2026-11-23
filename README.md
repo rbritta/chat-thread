@@ -10,7 +10,7 @@ A WhatsApp-style conversation thread for any app that talks: to a person, a grou
 
 ## What it does
 
-Vanilla JS, zero runtime dependencies, about 81 kB unminified (26 kB gzipped) plus 23 kB of CSS. The HTML comes from a pure function, so a server draws the same thread the browser does. A SQLite store and an HTTP handler for Node come with it.
+Vanilla JS, zero runtime dependencies, about 118 kB unminified (36 kB gzipped) plus 36 kB of CSS. The HTML comes from a pure function, so a server draws the same thread the browser does. A SQLite store and an HTTP handler for Node come with it.
 
 - **Sides, not labels.** Mine on the right in green, theirs on the left with the author's name (a session, an AI, each person in a group, each with a color if you want). The corner on the author's side is almost square.
 - **Time and ticks inside the bubble**, at the end of the last line: a clock while pending or queued, one tick sent, two delivered, two in color read.
@@ -23,6 +23,7 @@ Vanilla JS, zero runtime dependencies, about 81 kB unminified (26 kB gzipped) pl
 - **Quiet motion:** a new message fades in, a removed one folds away, "Read more" unrolls; short and eased, and none at all with `prefers-reduced-motion`.
 - **Accessible:** the thread is a log that announces new messages (not reloads), every button has a label, the focus stays in the box after sending, Ctrl+Enter sends when Enter does not, and every theme passes WCAG AA (the tests measure it).
 - **A box that behaves:** a pill that grows from one to six lines, Enter sends, Shift+Enter breaks the line, a round Send button that stays off while empty, suggestion chips above it and checkboxes below it.
+- **Tables and decisions:** GitHub's tables in markdown, buttons inside a message (`[✓](reply:yes)` sends, `[✎](fill:#4 · )` writes in the box), and a pinned message above the box that the other side rewrites as things are decided, with its first version and its markdown a click away. On a phone the table becomes cards. See [Tables, buttons and the pinned message](#tables-buttons-and-the-pinned-message).
 - **Notes without a bubble:** a bot or a system that narrates writes across the whole width with `kind: 'note'`, while the person's messages stay in bubbles.
 - **Three modes:** `chat`, `readonly` (a log, no box) and `preview` (what the other phone will show).
 - **Dark, light or auto.** Dark green by default, `light` for light apps, `auto` to follow the page's `data-theme` or the system, and `whatsapp` for the WhatsApp look with the tail and blue ticks. All of it is CSS variables: repaint for your app by setting a few `--ct-*` properties.
@@ -118,6 +119,7 @@ el.innerHTML = renderThread([{ from: 'me', text: 'Hi, *Alex*! See you ~Wed~ _Thu
 | `enterSends` | `true` | Enter sends and Shift+Enter breaks the line. `false` leaves Enter alone (Ctrl+Enter or Cmd+Enter still sends). |
 | `sendState` | none | The state a new message starts with in the store, e.g. `'queued'` while the other side is busy. |
 | `autoScroll` | `true` | Bring a new message into view. |
+| `resolved` | `false` | The thread is resolved: its pinned message reads "Final" and its buttons stop answering. `setResolved()` changes it. |
 | `typing`, `waiting` | `false` | Start with the typing dots or the waiting line: `true` or a name. |
 | `typingKind` | `'auto'` | The shape of the typing dots: `bubble`, `note` (bare dots, no name, for a side that narrates) or `auto`, the shape of the other side's last message (a bubble when there is none). |
 | `strings` | English | Every visible word, e.g. `{ placeholder: 'Write a reply', send: 'Post', today: 'Earlier today' }`, or a translation. See `DEFAULT_STRINGS`. |
@@ -131,9 +133,9 @@ el.innerHTML = renderThread([{ from: 'me', text: 'Hi, *Alex*! See you ~Wed~ _Thu
 | `onError` | `console.error` | Called when the store or a callback fails. The thread also fires a `chat-error` event. |
 | `now` | `() => new Date()` | The clock, for tests. |
 
-The returned chat has `append(message)`, `updateMessage(id, patch)`, `update({ messages?, typing?, waiting? })`, `setTyping(value)`, `setWaiting(value)`, `send(text, { photo }?)`, `openCamera()`, `reload()`, `configure(options)`, `focus()`, `messages`, `el`, `composer` and `destroy()`. A message from the other side passed to `append` clears the typing dots and the waiting line. A message whose `id` is already in the thread changes that one instead of adding a copy, so a live feed that echoes what was just sent shows it once. `configure` keeps the text being typed, the toggles' boxes and the focus; its `strings` merge with the ones already given. `destroy` takes out the thread and nothing else in the element.
+The returned chat has `append(message)`, `updateMessage(id, patch)`, `update({ messages?, typing?, waiting? })`, `setTyping(value)`, `setWaiting(value)`, `setResolved(value)`, `send(text, { photo }?)`, `openCamera()`, `reload()`, `configure(options)`, `focus()`, `messages`, `resolved`, `el`, `composer` and `destroy()`. A message from the other side passed to `append` clears the typing dots and the waiting line. A message whose `id` is already in the thread changes that one instead of adding a copy, so a live feed that echoes what was just sent shows it once. `configure` keeps the text being typed, the toggles' boxes and the focus; its `strings` merge with the ones already given. `destroy` takes out the thread and nothing else in the element.
 
-`core.js` exports the pure pieces: `renderThread`, `renderList`, `renderMessage`, `renderComposer`, `renderTyping`, `renderMarkdown`, `renderWhatsApp`, `renderPlain`, `normalizeMessage`, `formatTime`, `dayKey`, `dayLabel`, `escapeHtml`, `safeUrl`, `linkify`, `DEFAULT_STRINGS`, `DEFAULTS`, `KINDS`, `STATES` and `LIMITS`.
+`core.js` exports the pure pieces: `renderThread`, `renderList`, `renderMessage`, `renderPinned`, `renderComposer`, `renderTyping`, `renderMarkdown`, `renderWhatsApp`, `renderPlain`, `normalizeMessage`, `reviseMessage`, `keepOriginal`, `pinnedOf`, `formatTime`, `dayKey`, `dayLabel`, `escapeHtml`, `safeUrl`, `linkify`, `DEFAULT_STRINGS`, `DEFAULTS`, `KINDS`, `STATES` and `LIMITS`.
 
 ## Messages
 
@@ -151,6 +153,8 @@ The returned chat has `append(message)`, `updateMessage(id, patch)`, `update({ m
   title,       // a line above the text: 'Note of the day'
   format,      // 'markdown' | 'whatsapp' | 'plain', to override the thread's
   image,       // a photo above the text: '/photos/1.jpg', './a.jpg' or { src, alt, width?, height? }; a click opens it full size
+  pinned,      // true: shown above the box, rewritten in place (see the pinned message)
+  original,    // the first text of a pinned message, kept by the thread and the stores when the text changes
   meta,        // your own object, kept by the stores
 }
 ```
@@ -162,6 +166,81 @@ chat.append({ from: 'other', kind: 'note', text: 'Friday has **three** times ope
 ```
 
 A note is the other side telling what happens, the way a booking bot or a setup assistant talks: no bubble, no author line, no ticks, across the whole width in the theme's text color. It is markdown on either side, and Read more, Copy, `title`, `tag` and `alert` (a bar on the left) work as in a bubble. When the message has `at`, its time sits below the text in the muted color; `--ct-note-meta: none` hides it. `renderThread` draws the same note on a server. For a bot that only narrates, give its messages `kind: 'note'` in the app's mapping function and leave the person's as bubbles. While it writes, its typing dots are bare too, on the left with no bubble and no name: `typingKind: 'auto'` (the default) takes the shape of the other side's last message, and `typingKind: 'note'` asks for it before there is one.
+
+## Tables, buttons and the pinned message
+
+For a thread where the other side lays out a few items and the person decides each one: a review, a checklist, a session's questions. The other side writes one markdown message, pins it, and rewrites it as things are decided; the thread draws the table, its buttons and, on a phone, cards.
+
+```js
+chat.append({ id: 'review', from: 'other', pinned: true, text: [
+  '**Card statement · Nov 12** · 2 wait for you',
+  '',
+  '| # | Time | Item | Action |',
+  '|--:|---|---|---|',
+  '| **4** | 09:14 | *“coffee”*<br>**Café Norte · $18.40**<br>Two charges a minute apart: I kept one. | [✓](reply:#4 · Confirm "Confirm #4") [✎](fill:#4 · "Adjust #4") |',
+  '| | | [Keep both](reply:#4 · Keep both) [It was a refund](reply:#4 · It was a refund) ||',
+  '| **11** | 18:05 | *“parking”*<br>**Transport · $6.00** | [✎](fill:#11 · "Adjust #11") |',
+].join('\n') });
+
+// the person pressed ✓ on item 4: the app gets "#4 · Confirm" like any message, decides, and rewrites the table
+chat.updateMessage('review', { text: nextVersion });
+```
+
+<p>
+  <img src="docs/decisions.png" alt="A pinned table of decisions above the box: rows that wait for an answer, round ✓ and ✎ buttons, dashed suggestions under an item" width="560">
+  <img src="docs/decisions-phone.png" alt="The same table on a phone, as cards" width="240">
+</p>
+
+### Tables
+
+GitHub's tables (GFM), in any markdown message: a header row, a delimiter row with as many cells as the header (`---`, `:--`, `--:`, `:-:` for left, right, center), then rows until a blank line. Everything in a cell is escaped like any text, and then:
+
+- `\|` is a `|` inside a cell.
+- `<br>` (or `<br/>`) breaks the line inside a cell: the only HTML a table reads.
+- `||` makes the cell on its left span one more column (MultiMarkdown): `| a || b |` is `a` over two columns, then `b`.
+- `~~old~~` is struck through, in the muted color with a red line.
+- In a cell, `**bold**` is the value (`--ct-cell-strong`), `*italics*` what someone said (`--ct-said`), and plain text the quiet part (`--ct-cell`).
+- A row whose first cell is empty is the foot of the row above: no line between them, the same `data-key`, and its buttons in a row of dashed pills as wide as their words.
+
+A row with more cells than the header loses the extra ones; one with fewer gets empty cells. A delimiter row that does not fit the header leaves the lines as text. Every row carries `data-key`, the plain text of its first cell (a foot carries its row's), and every cell `data-col`, the plain text of its column's header.
+
+### Buttons in a message
+
+| Write | Get |
+| --- | --- |
+| `[label](reply:text)` | a button that sends `text` as an ordinary message, through `store.send` and `onSend` like a typed one |
+| `[label](fill:text)` | a button that puts `text` and a space in the box, with the caret at the end, and marks its table row (`ct-tr--editing`) until another button is pressed |
+| `[label](reply:text "hint")` | the hint is the button's `title` and `aria-label` |
+| a one-symbol label | a round icon: `✓` (also `✔`) is a check, `✎` (also `✏`) a pencil, anything else the symbol itself. Its name is the hint, or else its text |
+
+`\)` and `\"` put a `)` or a `"` in the text or the hint. Code spans keep them as text. They are buttons only in the other side's messages and only in `mode: 'chat'`; in my own messages, in a log or a preview, and in a resolved pinned message they are marks (`span.ct-reply--off`). A table row with a `reply:` button, with the rows that continue it, waits for an answer (`ct-tr--waiting`: tinted, and its `✎` is yellow); a row with only `fill:` is decided, and its `✎` is green. After a `reply:` is pressed its cell shows a clock and the button's name (`ct-reply-pending`) until the message is rewritten; if the send fails, the button comes back. The click changes nothing until it is over, so the app's own listeners still find the button.
+
+### The pinned message
+
+A message with `pinned: true` is drawn in a bar between the list and the box instead of in the list, with "Pinned" and "Rewritten in place as things are decided" above it. Only the last pinned message is there; an older one stays in the list. `updateMessage(id, { text })` rewrites it in place, keeping what the bar shows and the focus on its buttons; `{ pinned: false }` puts it back in the list.
+
+- **`original`:** the first text of a pinned message. The first time its text changes (`updateMessage`, `append` of a new copy, the stores' `update`), the text it had is kept in `original`, and later rewrites keep that one. The bar then offers **See the original**. Pass `original` yourself to set it, or `original: null` in `updateMessage` to forget it. A copy that arrives with `original: null` (a live feed) keeps the one the thread knows.
+- **See the markdown** shows the text as it was written. The pressed button reads **See the current one**.
+- **Resolved:** `createChat({ resolved: true })` or `chat.setResolved(true)` turns the bar into "Final" ("Resolved: this is where it ended"), and its buttons into marks. `createThreads` does it for a thread whose `status` is `resolved`. `chat.resolved` says which it is.
+- **On a server:** `renderThread(messages, options, { resolved })` draws the bar; `renderPinned(message, options, { resolved, view })` draws only the bar. A hydrated thread takes the bar as the server drew it.
+
+| String | Default |
+| --- | --- |
+| `pinned` | `Pinned` |
+| `final` | `Final` |
+| `pinnedHint` | `Rewritten in place as things are decided` |
+| `finalHint` | `Resolved: this is where it ended` |
+| `showOriginal` | `See the original` |
+| `showSource` | `See the markdown` |
+| `showCurrent` | `See the current one` |
+
+### On a phone
+
+Up to 700 px wide, a table of three or more columns becomes cards: no header; the first two cells on the first line, joined by ` · ` (`4 · 09:14`); the third below them; from the fourth on, each cell under its column's name, except the cells that only hold buttons. A two-column table stays a table, and scrolls inside its message if it has to.
+
+### Classes and colors
+
+`.ct-table` (and `.ct-table--cards` with three or more columns) wraps the table; rows get `ct-tr--waiting`, `ct-tr--foot`, `ct-tr--continued` (a row followed by its foot) and `ct-tr--editing`; a cell of buttons gets `ct-td--actions`; a foot's buttons sit in `.ct-actions`. The buttons are `.ct-chip.ct-reply` (`.ct-chip--icon` when round, `data-fill` for `fill:`). The bar is `.ct-pinned` (`.ct-pinned--final`), with `.ct-pinned-head`, `.ct-pinned-label`, `.ct-pinned-hint`, `.ct-pinned-view`, `.ct-pinned-body`, `.ct-pinned-original` and `.ct-pinned-source`. The colors are `--ct-ok`, `--ct-warn` (with `-tint` and `-edge`), `--ct-row-wait`, `--ct-row-edit`, `--ct-said`, `--ct-cell`, `--ct-cell-strong`, `--ct-line`, `--ct-pinned`, `--ct-pinned-head` and `--ct-pinned-border`, in every theme; the tests measure them for WCAG AA.
 
 ## Dates and times
 
@@ -246,7 +325,7 @@ Everything is a custom property on `.ct`. Set a few on your container to fit you
 .my-panel .ct { --ct-theirs: #1c232c; --ct-theirs-border: #2a323d; --ct-font-size: 13.5px; }
 ```
 
-The main ones: `--ct-mine`, `--ct-mine-border`, `--ct-theirs`, `--ct-theirs-border`, `--ct-text`, `--ct-muted`, `--ct-tick`, `--ct-link`, `--ct-hover`, `--ct-author`, `--ct-title`, `--ct-field`, `--ct-field-border`, `--ct-focus`, `--ct-send`, `--ct-alert`, `--ct-day`, `--ct-font`, `--ct-font-size`, `--ct-max-width`, `--ct-note-meta`. Links have no underline and turn `--ct-hover` (`#6e7681`) on hover. The thread has no background of its own: it sits on yours.
+The main ones: `--ct-mine`, `--ct-mine-border`, `--ct-theirs`, `--ct-theirs-border`, `--ct-text`, `--ct-muted`, `--ct-tick`, `--ct-link`, `--ct-hover`, `--ct-author`, `--ct-title`, `--ct-field`, `--ct-field-border`, `--ct-focus`, `--ct-send`, `--ct-alert`, `--ct-day`, `--ct-font`, `--ct-font-size`, `--ct-max-width`, `--ct-note-meta`; for tables and the pinned message, the ones in [Classes and colors](#classes-and-colors). Links have no underline and turn `--ct-hover` (`#6e7681`) on hover. The thread has no background of its own: it sits on yours.
 
 ## Server
 
@@ -276,7 +355,7 @@ store.add('support', { from: 'other', author: 'Assistant', text: 'Done.' });
 | `POST /api/chat/:thread` | `{ text, state?, meta? }` | the message, always `from: 'me'`; `state` only `pending`, `queued` or `sent` |
 | `PATCH /api/chat/:thread/:id` | `{ removed: true }` | `{ ok, id }`, only for my own messages |
 
-The browser can only write as `me`, and only bubbles; notes (`store.add(thread, { kind: 'note', text })`), replies and state changes (`store.update(thread, id, { state: 'read' })`, a streamed `{ text }`) come from your server. If a framework already read the body, `req.body` is used. Nothing is deleted: removed messages keep their row with a timestamp. `onChange` gets every `add`, `update` and `remove`. A table made by 0.1.0 gets the `kind` column the first time a store opens it.
+The browser can only write as `me`, and only bubbles; notes (`store.add(thread, { kind: 'note', text })`), replies and state changes (`store.update(thread, id, { state: 'read' })`, a streamed `{ text }`) come from your server. If a framework already read the body, `req.body` is used. Nothing is deleted: removed messages keep their row with a timestamp. `onChange` gets every `add`, `update` and `remove`. The store keeps `pinned` and `original`: when `update` changes the text of a pinned message, the text it had goes to `original` (once), and the browser can never pin. A table made by an older version gets the `kind`, `pinned` and `original` columns the first time a store opens it.
 
 ## Part of a small family
 
@@ -302,7 +381,7 @@ npm run build          # dist/ (commit it: script-tag users take it from the rep
 npm run screenshots    # regenerates docs/*.png from the demo
 ```
 
-Node 22.5 or newer (for `node:sqlite` in the tests). 91 tests: 46 run in Node (the core, the server, the release notes) and 45 in a real browser. The browser tests pin the language, the time zone and the clock, so they give the same result on any machine; with no browser installed they skip and say why (CI makes that an error). Why the library looks the way it does: [docs/extraction.md](docs/extraction.md).
+Node 22.5 or newer (for `node:sqlite` in the tests). 103 tests: 53 run in Node (the core, the server, the release notes) and 50 in a real browser. The browser tests pin the language, the time zone and the clock, so they give the same result on any machine; with no browser installed they skip and say why (CI makes that an error). Why the library looks the way it does: [docs/extraction.md](docs/extraction.md).
 
 ## Contributing
 

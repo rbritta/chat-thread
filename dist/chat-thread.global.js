@@ -1,4 +1,4 @@
-/*! chat-thread v0.9.0 | MIT | https://github.com/rbritta/chat-thread */
+/*! chat-thread v0.10.0 | MIT | https://github.com/rbritta/chat-thread */
 (function (global) {
 'use strict';
 /**
@@ -49,6 +49,13 @@ const DEFAULT_STRINGS = Object.freeze({
   close: 'Close',
   photo: 'Photo',
   enlarge: 'Enlarge photo',
+  pinned: 'Pinned',
+  final: 'Final',
+  pinnedHint: 'Rewritten in place as things are decided',
+  finalHint: 'Resolved: this is where it ended',
+  showOriginal: 'See the original',
+  showSource: 'See the markdown',
+  showCurrent: 'See the current one',
 });
 
 /** What the + left of the box can offer. Only `camera` for now: take a photo and send it with a caption. */
@@ -197,10 +204,52 @@ function markdownEmphasis(s) {
     .replace(/()~~(?=\S)([^\n]*?\S)~~/g, wrapIn('del'));
 }
 
-/** One line of markdown: `code`, [links](url), bare URLs, **bold**, *italic*, ~~strike~~. */
-function markdownInline(line) {
+const PENCIL_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
+const CHECK_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+/** Labels of a reply button that become the library's icons: the pencil and the check. */
+const REPLY_ICONS = { '✎': PENCIL_ICON, '✏': PENCIL_ICON, '✏️': PENCIL_ICON, '✓': CHECK_ICON, '✔': CHECK_ICON, '✔️': CHECK_ICON };
+
+// [label](reply:text "hint") and [label](fill:text "hint"); a backslash escapes ) and " in the text and the hint
+const REPLY_LINK = /\[([^\]\n]{1,500})\]\((reply|fill):((?:\\.|[^)"\\\n\u0000])*?)\s*(?:"((?:\\.|[^"\\\n\u0000])*)"\s*)?\)/g;
+const unescapeLink = (s) => s.replace(/\\(.)/g, '$1');
+
+/**
+ * A reply button inside a message: `reply:` sends its text, `fill:` puts it in the box (with a
+ * space at the end, to go on typing). A one-symbol label is a round icon (✎ and ✓ become the
+ * library's pencil and check) named by the hint. With `live` off (my own messages, a log, a
+ * resolved thread) it is the same chip as a span that does nothing.
+ */
+function replyButton(label, kind, rawText, rawHint, live) {
+  let text = clip(unescapeLink(rawText).trim(), LIMITS.chip);
+  if (!text) return null;
+  if (kind === 'fill') text += ' ';
+  const hint = clip(unescapeLink(rawHint || '').trim(), LIMITS.title);
+  const symbol = label.trim();
+  const icon = REPLY_ICONS[symbol];
+  const round = !!icon || [...symbol].length === 1;
+  const cls = `ct-chip ct-reply${round ? ' ct-chip--icon' : ''}`;
+  const name = hint || (round ? text.trim() : '');
+  const face = icon || markdownEmphasis(escapeHtml(label));
+  const fill = kind === 'fill' ? ' data-fill' : '';
+  if (!live) {
+    const named = name ? `${round ? ` role="img" aria-label="${escapeHtml(name)}"` : ''} title="${escapeHtml(name)}"` : '';
+    return `<span class="${cls} ct-reply--off"${fill}${named}>${face}</span>`;
+  }
+  const named = name ? ` title="${escapeHtml(name)}" aria-label="${escapeHtml(name)}"` : '';
+  return `<button type="button" class="${cls}" data-text="${escapeHtml(text)}"${fill}${named}>${face}</button>`;
+}
+
+/**
+ * One line of markdown: `code`, [links](url), bare URLs, **bold**, *italic*, ~~strike~~, and
+ * the reply buttons `[label](reply:text)` and `[label](fill:text)`, live when `replies` is on.
+ */
+function markdownInline(line, { replies = false } = {}) {
   const { keep, restore } = stasher();
   let s = line.replace(/`([^`\n]+)`/g, (_, code) => keep(`<code>${escapeHtml(code)}</code>`));
+  s = s.replace(REPLY_LINK, (whole, label, kind, text, hint) => {
+    const html = replyButton(label, kind, text, hint, replies);
+    return html ? keep(html) : whole;
+  });
   s = s.replace(/\[([^\]\n]{1,500})\]\(\s*([^)\s]+)\s*\)/g, (whole, label, url) => {
     const href = safeUrl(url);
     return href ? keep(anchor(href, markdownEmphasis(escapeHtml(label)))) : whole;
@@ -219,27 +268,140 @@ function codeBlock(code, lang, { copy, strings }) {
 const FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*([\w#+.-]{0,30})[^`]*$/;
 
 /**
- * A safe subset of markdown, as chat answers use it: paragraphs (single newlines kept),
- * `#` headings, `-` and `1.` lists, fenced code with a Copy button, `code`, **bold**,
- * *italic*, ~~strike~~, [links](url) and bare URLs. Raw HTML is always shown as text.
+ * The cells of a table row. `\|` is a pipe inside a cell; `||` (nothing between the bars)
+ * stretches the cell on its left over one more column, as MultiMarkdown does.
  */
-function renderMarkdown(value, { copy = true, strings = DEFAULT_STRINGS } = {}) {
+function tableCells(row) {
+  let s = row.trim();
+  if (s.startsWith('|')) s = s.slice(1);
+  if (s.endsWith('|') && !s.endsWith('\\|')) s = s.slice(0, -1);
+  const parts = [''];
+  for (let k = 0; k < s.length; k++) {
+    if (s[k] === '\\' && s[k + 1] === '|') {
+      parts[parts.length - 1] += '|';
+      k++;
+    } else if (s[k] === '|') parts.push('');
+    else parts[parts.length - 1] += s[k];
+  }
+  const cells = [];
+  for (const part of parts) {
+    if (part === '' && cells.length) cells[cells.length - 1].span += 1;
+    else cells.push({ text: part.trim(), span: 1 });
+  }
+  return cells;
+}
+
+const DELIMITER = /^\s*:?-+:?\s*$/;
+
+/** The alignments of a table when `head` and `next` start one (GFM: a delimiter cell per column), else null. */
+function tableStart(head, next) {
+  if (!head.includes('|') || next === undefined || !next.includes('-')) return null;
+  const columns = tableCells(head).reduce((n, c) => n + c.span, 0);
+  const delimiters = tableCells(next);
+  if (delimiters.length !== columns || !delimiters.every((c) => c.span === 1 && DELIMITER.test(c.text))) return null;
+  return delimiters.map(({ text }) => {
+    const t = text.trim();
+    if (t.startsWith(':') && t.endsWith(':')) return 'center';
+    if (t.endsWith(':')) return 'right';
+    return t.startsWith(':') ? 'left' : '';
+  });
+}
+
+/** A row's cells brought to the table's columns: extra cells dropped, missing ones empty. */
+function fitCells(cells, columns) {
+  const out = [];
+  let used = 0;
+  for (const c of cells) {
+    if (used >= columns) break;
+    const span = Math.min(c.span, columns - used);
+    out.push({ ...c, span, col: used });
+    used += span;
+  }
+  while (used < columns) out.push({ text: '', span: 1, col: used++ });
+  return out;
+}
+
+/** A cell's words with no marks: the column names on a phone's cards and the row keys. */
+const plainCell = (text) => text.replace(/<br\s*\/?>[\s\S]*$/i, '').replace(/[*_`~]/g, '').trim();
+/** A cell: inline markdown, and `<br>` (the only HTML read, as GFM tables use it) for a line break. */
+const cellHtml = (text, ctx) => text.split(/<br\s*\/?>/i).map((piece) => markdownInline(piece, ctx)).join('<br>');
+
+/**
+ * A GFM table. A row whose first cell is empty continues the row above it: the same
+ * `data-key`, no line between them, the class `ct-tr--foot`, its cells' buttons in a row
+ * (`.ct-actions`). A row whose group has a `reply:` button waits for an answer (`ct-tr--waiting`).
+ */
+function renderTable(head, aligns, rows, ctx) {
+  const columns = aligns.length;
+  const align = (col) => (aligns[col] ? ` align="${aligns[col]}"` : '');
+  const span = (c) => (c.span > 1 ? ` colspan="${c.span}"` : '');
+  const header = fitCells(tableCells(head), columns);
+  const names = [];
+  for (const c of header) for (let k = 0; k < c.span; k++) names[c.col + k] = plainCell(c.text);
+  const body = rows.map((line) => fitCells(tableCells(line), columns));
+  // rows in groups: a row with its first cell filled, then the rows that continue it
+  const groups = [];
+  for (const cells of body) {
+    const foot = cells[0].text === '' && groups.length > 0;
+    if (foot) groups[groups.length - 1].rows.push(cells);
+    else groups.push({ key: plainCell(cells[0].text), rows: [cells] });
+  }
+  const waits = (cells) => cells.some((c) => /\]\(reply:/.test(c.text));
+  const tbody = groups.map((g) => {
+    const waiting = g.rows.some(waits);
+    return g.rows.map((cells, n) => {
+      const foot = n > 0;
+      const cls = [foot ? 'ct-tr--foot' : '', waiting ? 'ct-tr--waiting' : '', n < g.rows.length - 1 ? 'ct-tr--continued' : ''].filter(Boolean).join(' ');
+      const tds = cells.map((c) => {
+        const html = cellHtml(c.text, ctx);
+        const buttons = /\]\((?:reply|fill):/.test(c.text);
+        const inner = foot && c.text ? `<div class="ct-actions">${html}</div>` : html;
+        const tdClass = buttons && !foot ? ' class="ct-td--actions"' : '';
+        return `<td data-col="${escapeHtml(names[c.col] || '')}"${align(c.col)}${span(c)}${tdClass}>${inner}</td>`;
+      }).join('');
+      return `<tr${g.key ? ` data-key="${escapeHtml(g.key)}"` : ''}${cls ? ` class="${cls}"` : ''}>${tds}</tr>`;
+    }).join('');
+  }).join('');
+  const ths = header.map((c) => `<th${align(c.col)}${span(c)}>${cellHtml(c.text, ctx)}</th>`).join('');
+  return `<div class="ct-table${columns >= 3 ? ' ct-table--cards' : ''}"><table><thead><tr>${ths}</tr></thead>${tbody ? `<tbody>${tbody}</tbody>` : ''}</table></div>`;
+}
+
+/**
+ * A safe subset of markdown, as chat answers use it: paragraphs (single newlines kept),
+ * `#` headings, `-` and `1.` lists, GFM tables, fenced code with a Copy button, `code`,
+ * **bold**, *italic*, ~~strike~~, [links](url) and bare URLs. Raw HTML is always shown as
+ * text (only `<br>` inside a table cell breaks the line). With `replies`, `[label](reply:text)`
+ * and `[label](fill:text)` are buttons that answer (see `renderMessage`).
+ */
+function renderMarkdown(value, { copy = true, strings = DEFAULT_STRINGS, replies = false } = {}) {
+  const ctx = { replies: replies === true };
+  const inline = (line) => markdownInline(line, ctx);
   const lines = clean(value).split('\n');
   const out = [];
   let para = [];
   let list = null;
   const flushPara = () => {
-    if (para.length) out.push(`<p>${para.map(markdownInline).join('<br>')}</p>`);
+    if (para.length) out.push(`<p>${para.map(inline).join('<br>')}</p>`);
     para = [];
   };
   const flushList = () => {
     if (!list) return;
     const start = list.type === 'ol' && list.start !== 1 ? ` start="${list.start}"` : '';
-    out.push(`<${list.type}${start}>${list.items.map((item) => `<li>${item.map(markdownInline).join('<br>')}</li>`).join('')}</${list.type}>`);
+    out.push(`<${list.type}${start}>${list.items.map((item) => `<li>${item.map(inline).join('<br>')}</li>`).join('')}</${list.type}>`);
     list = null;
   };
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    const aligns = tableStart(line, lines[i + 1]);
+    if (aligns) {
+      flushPara();
+      flushList();
+      const rows = [];
+      for (i += 2; i < lines.length && lines[i].trim() && lines[i].includes('|') && !FENCE.test(lines[i]); i++) rows.push(lines[i]);
+      i--;
+      out.push(renderTable(line, aligns, rows, ctx));
+      continue;
+    }
     const fence = FENCE.exec(line);
     if (fence) {
       flushPara();
@@ -256,7 +418,7 @@ function renderMarkdown(value, { copy = true, strings = DEFAULT_STRINGS } = {}) 
     if (heading) {
       flushPara();
       flushList();
-      out.push(`<p class="ct-heading">${markdownInline(heading[1])}</p>`);
+      out.push(`<p class="ct-heading">${inline(heading[1])}</p>`);
       continue;
     }
     const bullet = /^\s*[-*+]\s+(.*)$/.exec(line);
@@ -309,8 +471,8 @@ function renderPlain(value) {
 }
 
 /** The body HTML of a text in one of `FORMATS`. */
-function formatText(value, format = 'plain', { copy = true, strings = DEFAULT_STRINGS } = {}) {
-  if (format === 'markdown') return renderMarkdown(value, { copy, strings });
+function formatText(value, format = 'plain', { copy = true, strings = DEFAULT_STRINGS, replies = false } = {}) {
+  if (format === 'markdown') return renderMarkdown(value, { copy, strings, replies });
   if (format === 'whatsapp') return renderWhatsApp(value);
   return renderPlain(value);
 }
@@ -416,7 +578,35 @@ function normalizeMessage(input) {
     format: FORMATS.includes(m.format) ? m.format : null,
     meta: m.meta && typeof m.meta === 'object' && !Array.isArray(m.meta) ? m.meta : null,
     image: normalizeImage(m.image),
+    pinned: m.pinned === true,
+    original: typeof m.original === 'string' && m.original ? clip(m.original, LIMITS.text) : null,
   };
+}
+
+/**
+ * The `original` of a message after a change: the text a pinned message had before its first
+ * rewrite, kept from then on. `given` is the `original` the change itself brought: when it is
+ * not `undefined`, the app decided (a string, or `null` to forget it).
+ */
+function keepOriginal(before, after, given) {
+  if (given !== undefined) return after.original;
+  if (before.original) return before.original;
+  return (before.pinned || after.pinned) && before.text && before.text !== after.text ? before.text : null;
+}
+
+/** A message with `patch` applied, as `updateMessage` and the stores do it: the id stays, and so does the first text of a pinned message. */
+function reviseMessage(before, patch = {}) {
+  const prev = normalizeMessage(before);
+  const next = normalizeMessage({ ...prev, ...patch, id: prev.id });
+  next.original = keepOriginal(prev, next, patch.original);
+  return next;
+}
+
+/** The message the thread shows above the box: the last one with `pinned: true`, or null. */
+function pinnedOf(messages) {
+  const list = Array.isArray(messages) ? messages : [];
+  for (let i = list.length - 1; i >= 0; i--) if (list[i]?.pinned === true) return list[i];
+  return null;
 }
 
 /** A picture inlined as base64 (what a camera preview makes), up to 1 MB. Never SVG: it can carry script. */
@@ -520,7 +710,8 @@ function renderMessage(input, options) {
   const author = name ? authorLabel(name, o) : '';
   const title = m.title ? `<p class="ct-title">${escapeHtml(m.title)}</p>` : '';
 
-  let body = formatText(m.text, format, { copy: o.copy, strings: s });
+  // buttons inside a message answer for me: only in the other side's messages, and only where I can send
+  let body = formatText(m.text, format, { copy: o.copy, strings: s, replies: !mine && o.mode === 'chat' });
   const image = m.image
     ? `<button type="button" class="ct-img" aria-label="${escapeHtml(s.enlarge)}" title="${escapeHtml(s.enlarge)}"><img src="${escapeHtml(m.image.src)}" alt="${escapeHtml(m.image.alt)}"${thumbSize(m.image)} loading="lazy" decoding="async"></button>`
     : '';
@@ -543,6 +734,35 @@ function renderMessage(input, options) {
   const day = m.at ? ` data-day="${dayKey(m.at, o)}"` : '';
   if (image) classes.push('ct-msg--image');
   return `<div class="${classes.join(' ')}"${id}${day}>${author}${title}${image}${inner}</div>`;
+}
+
+const PIN_VIEWS = ['current', 'original', 'source'];
+
+/**
+ * The pinned message above the box: a head ("Pinned", or "Final" once the thread is
+ * `resolved`) with "See the original" (when the text changed since it was pinned) and "See
+ * the markdown", then the message's text. `view` is the one shown: `current`, `original` or
+ * `source`. Its reply buttons answer while the thread is open; resolved, they are only marks.
+ */
+function renderPinned(input, options, { resolved = false, view = 'current' } = {}) {
+  const o = resolveOptions(options);
+  const s = o.strings;
+  const m = normalizeMessage(input);
+  const mine = m.from === 'me';
+  const format = m.format || (o.format === 'auto' ? (mine && m.kind !== 'note' ? 'plain' : 'markdown') : o.format);
+  const original = m.original && m.original !== m.text ? m.original : '';
+  const v = PIN_VIEWS.includes(view) && (view !== 'original' || original) ? view : 'current';
+  const live = !mine && o.mode === 'chat' && !resolved;
+  const body = (text, replies) => formatText(text, format, { copy: o.copy, strings: s, replies });
+  const hidden = (name) => (v === name ? '' : ' hidden');
+  const button = (name, label) => `<button type="button" class="ct-pinned-view" data-view="${name}" aria-pressed="${v === name}">${escapeHtml(v === name ? s.showCurrent : label)}</button>`;
+  const title = m.title ? `<p class="ct-title">${escapeHtml(m.title)}</p>` : '';
+  const id = m.id !== null ? ` data-id="${escapeHtml(String(m.id))}"` : '';
+  const head = `<div class="ct-pinned-head"><span class="ct-pinned-label">${escapeHtml(resolved ? s.final : s.pinned)}</span><span class="ct-pinned-hint">${escapeHtml(resolved ? s.finalHint : s.pinnedHint)}</span>${original ? button('original', s.showOriginal) : ''}${button('source', s.showSource)}</div>`;
+  return `<div class="ct-pinned${resolved ? ' ct-pinned--final' : ''}" role="region" aria-label="${escapeHtml(resolved ? s.final : s.pinned)}"${id} data-view="${v}">${head}`
+    + `<div class="ct-body ct-pinned-body"${hidden('current')}>${title}${body(m.text, live)}</div>`
+    + (original ? `<div class="ct-body ct-pinned-body ct-pinned-original"${hidden('original')}>${title}${body(original, false)}</div>` : '')
+    + `<pre class="ct-pinned-source"${hidden('source')}>${escapeHtml(m.text)}</pre></div>`;
 }
 
 /** The day separator before the first message of each day. */
@@ -590,13 +810,16 @@ function typingKindOf(messages, o) {
 /**
  * The inside of `.ct-list`: day separators, bubbles, then the typing and waiting lines.
  * `state` is `{ typing, waiting }`, each `false`, `true` (the thread's `author`) or a name.
+ * The pinned message (the last one with `pinned: true`) is not in the list: it is above the box.
  */
 function renderList(messages = [], options = {}, state = {}) {
   const o = resolveOptions(options);
   const list = (Array.isArray(messages) ? messages : []).map(normalizeMessage);
+  const pinned = pinnedOf(list);
   const parts = [];
   let last = '';
   for (const m of list) {
+    if (m === pinned) continue;
     const key = o.days && m.at ? dayKey(m.at, o) : '';
     if (key && key !== last) {
       parts.push(renderDay(key, o));
@@ -652,15 +875,17 @@ function carriedOptions(o) {
 /**
  * A whole thread as an HTML string: what a server sends, and what `createChat` draws.
  * Modes: `chat` (with the box), `readonly` (no box) and `preview` (no box, no day separators).
+ * `state` is `{ typing, waiting, resolved }`: `resolved` turns the pinned message's "Pinned" into "Final".
  */
 function renderThread(messages = [], options = {}, state = {}) {
   const o = resolveOptions(options);
+  const pinned = pinnedOf((Array.isArray(messages) ? messages : []).map(normalizeMessage));
   const classes = ['ct'];
   if (o.theme !== 'dark') classes.push(`ct--${o.theme}`);
   if (o.mode !== 'chat') classes.push(`ct--${o.mode}`);
   const carried = carriedOptions(o);
   const data = carried ? ` data-options="${escapeHtml(carried)}"` : '';
-  return `<div class="${classes.join(' ')}" data-mode="${o.mode}"${data}><div class="ct-list" role="log" aria-label="${escapeHtml(o.strings.thread)}">${renderList(messages, o, state)}</div>${o.mode === 'chat' ? renderComposer(o) : ''}</div>`;
+  return `<div class="${classes.join(' ')}" data-mode="${o.mode}"${data}><div class="ct-list" role="log" aria-label="${escapeHtml(o.strings.thread)}">${renderList(messages, o, state)}</div>${pinned ? renderPinned(pinned, o, { resolved: state.resolved === true }) : ''}${o.mode === 'chat' ? renderComposer(o) : ''}</div>`;
 }
 
 /**
@@ -688,6 +913,9 @@ let sequence = 0;
 
 const reportError = (err) => console.error('[chat-thread]', err);
 const sameId = (a, b) => String(a) === String(b);
+const CLOCK_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 8v4l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+/** The key of a message's id as `data-id` writes it ('' for none), to compare ids that may be numbers or strings. */
+const idKey = (m) => (m ? (m.id === null || m.id === undefined ? '' : String(m.id)) : null);
 const CLOSE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
 
 function fragment(html) {
@@ -774,6 +1002,9 @@ function createChat(el, options = {}) {
   let messages = (given.messages || []).map(normalizeMessage);
   let typing = given.typing || false;
   let waiting = given.waiting || false;
+  let resolved = given.resolved === true;
+  let pinView = 'current';         // the pinned message's view: current, original or source
+  let pinnedKey = null;            // the id of the message in the pinned bar (idKey), null for none
   let list = null;
   let input = null;
   let sendButton = null;
@@ -784,6 +1015,7 @@ function createChat(el, options = {}) {
   const painted = new WeakMap();   // the typing or waiting node -> the state it shows
   const removing = new WeakSet();  // queued messages whose × was already pressed
   const copied = new WeakMap();    // Copy button -> the timer that turns "Copied" back
+  const pressed = new WeakSet();   // reply buttons already pressed
 
   const later = (fn, ms) => {
     const t = setTimeout(() => { timers.delete(t); fn(); }, ms);
@@ -808,13 +1040,16 @@ function createChat(el, options = {}) {
   ];
 
   function mount(hydrate) {
-    if (!hydrate) place(fragment(renderThread(messages, opts, { typing, waiting })).firstElementChild);
+    if (!hydrate) place(fragment(renderThread(messages, opts, { typing, waiting, resolved })).firstElementChild);
     list = root.querySelector('.ct-list');
     input = root.querySelector('.ct-input');
     sendButton = root.querySelector('.ct-send');
     for (const [type, fn] of listeners) root.addEventListener(type, fn);
-    if (hydrate) adoptIndicators();
-    else markIndicators();
+    pinnedKey = idKey(pinnedOf(messages));
+    if (hydrate) {
+      adoptIndicators();
+      adoptPinned();
+    } else markIndicators();
     settle(root);
     grow();
   }
@@ -1128,6 +1363,101 @@ function createChat(el, options = {}) {
     quietly(() => list.replaceChildren(fragment(renderList(messages, opts, { typing, waiting }))));
     markIndicators();
     settle(list);
+    pinnedKey = idKey(pinnedOf(messages));
+    drawPinned();
+  }
+
+  /* ---- the pinned message: above the box, rewritten in place ---- */
+  const pinnedNode = () => root?.querySelector(':scope > .ct-pinned') ?? null;
+
+  /** Draws the pinned bar again (or takes it away), keeping its view and the focus on its buttons. */
+  function drawPinned() {
+    const pin = pinnedOf(messages);
+    const node = pinnedNode();
+    if (!pin) {
+      // a bar a server drew for a message this script was not given stays: it cannot be drawn again
+      if (node && messages.some((m) => idKey(m) === (node.dataset.id ?? ''))) node.remove();
+      else if (node) markResolved(node);
+      return;
+    }
+    if (node && (node.dataset.id ?? '') !== idKey(pin)) pinView = 'current';
+    const focused = node?.contains(document.activeElement) ? document.activeElement.dataset.view : null;
+    const fresh = fragment(renderPinned(pin, opts, { resolved, view: pinView })).firstElementChild;
+    if (node) node.replaceWith(fresh);
+    else list.after(fresh);
+    pinView = fresh.dataset.view;
+    if (focused) fresh.querySelector(`.ct-pinned-view[data-view="${focused}"]`)?.focus();
+  }
+
+  /** "Pinned" or "Final" on a bar whose message this script does not know. */
+  function markResolved(node) {
+    const s = opts.strings;
+    node.classList.toggle('ct-pinned--final', resolved);
+    node.setAttribute('aria-label', resolved ? s.final : s.pinned);
+    const label = node.querySelector('.ct-pinned-label');
+    const hint = node.querySelector('.ct-pinned-hint');
+    if (label) label.textContent = resolved ? s.final : s.pinned;
+    if (hint) hint.textContent = resolved ? s.finalHint : s.pinnedHint;
+  }
+
+  /** A hydrated thread takes the bar the server drew: its view, and "Final" when it was resolved. */
+  function adoptPinned() {
+    const node = pinnedNode();
+    if (node) {
+      resolved = node.classList.contains('ct-pinned--final');
+      pinView = node.dataset.view || 'current';
+      if (pinnedKey === null) pinnedKey = node.dataset.id ?? '';
+    }
+    if (given.resolved !== undefined && resolved !== (given.resolved === true)) {
+      resolved = given.resolved === true;
+      drawPinned();
+    }
+  }
+
+  /** Shows the current text, the original or the markdown of the pinned message, without drawing it again. */
+  function setPinnedView(view) {
+    const node = pinnedNode();
+    if (!node) return;
+    const s = opts.strings;
+    const original = node.querySelector('.ct-pinned-original');
+    const v = view === 'original' && !original ? 'current' : view;
+    pinView = v;
+    node.dataset.view = v;
+    node.querySelector('.ct-pinned-body:not(.ct-pinned-original)').hidden = v !== 'current';
+    if (original) original.hidden = v !== 'original';
+    node.querySelector('.ct-pinned-source').hidden = v !== 'source';
+    for (const b of node.querySelectorAll('.ct-pinned-view')) {
+      const on = b.dataset.view === v;
+      b.setAttribute('aria-pressed', String(on));
+      b.textContent = on ? s.showCurrent : b.dataset.view === 'original' ? s.showOriginal : s.showSource;
+    }
+  }
+
+  /**
+   * Draws a new or changed message where it belongs. The pinned one is in the bar: when another
+   * message takes its place (or it is unpinned), the old one goes back to its place in the list.
+   */
+  function show(message) {
+    const key = idKey(pinnedOf(messages));
+    if (key !== pinnedKey) {
+      const old = pinnedKey;
+      pinnedKey = key;
+      if (old !== null && messages.some((m) => idKey(m) === old)) return drawList();
+      if (key !== null) {
+        const moved = [...list.querySelectorAll(':scope > .ct-msg[data-id]')].find((n) => n.dataset.id === key);
+        if (moved) {
+          moved.remove();
+          pruneDays();
+        }
+      }
+      drawPinned();
+      if (key === idKey(message)) return;
+    } else if (key !== null && key === idKey(message)) {
+      drawPinned();
+      return;
+    }
+    if (nodeOf(message.id)) redraw(message.id, message);
+    else insert(message);
   }
 
   const indicator = (cls) => list.querySelector(`:scope > .${cls}`);
@@ -1306,13 +1636,17 @@ function createChat(el, options = {}) {
     return message;
   }
 
-  /** Puts a message in the thread: in place when its id is already on screen, at the end otherwise. */
+  /**
+   * Puts a message in the thread: in place when its id is already on screen, at the end otherwise.
+   * A new copy of a pinned message that brings no `original` keeps the one already known.
+   */
   function upsert(message) {
     const index = messages.findIndex((m) => sameId(m.id, message.id));
-    if (index >= 0) messages[index] = message;
-    else messages.push(message);   // new, or one the server drew and this script now knows
-    if (nodeOf(message.id)) redraw(message.id, message);
-    else insert(message);
+    if (index >= 0) {
+      if (message.original === null) message.original = keepOriginal(messages[index], message);
+      messages[index] = message;
+    } else messages.push(message);   // new, or one the server drew and this script now knows
+    show(message);
   }
 
   async function remove(node) {
@@ -1410,6 +1744,8 @@ function createChat(el, options = {}) {
     else if (is('ct-img')) viewer.open(button);
     else if (is('ct-copy')) copy(button);
     else if (is('ct-remove')) remove(button.closest('.ct-msg'));
+    else if (is('ct-pinned-view')) setPinnedView(button.getAttribute('aria-pressed') === 'true' ? 'current' : button.dataset.view);
+    else if (is('ct-reply')) reply(button);
     else if (is('ct-chip')) {
       const value = button.dataset.text || button.textContent;
       if (button.hasAttribute('data-fill') && input) {
@@ -1420,6 +1756,54 @@ function createChat(el, options = {}) {
         send(value);
       }
     }
+  }
+
+  /**
+   * A button inside a message. `fill` puts its text in the box and marks the table row it is
+   * in (with the rows that continue it); `reply` sends its text like any message, and its cell
+   * shows it waiting until the message is rewritten. The cell changes after this click is over,
+   * so every other listener still finds the button where it was.
+   */
+  function reply(button) {
+    const value = button.dataset.text;
+    if (!value) return;
+    const row = button.closest('tr');
+    for (const tr of root.querySelectorAll('tr.ct-tr--editing')) tr.classList.remove('ct-tr--editing');
+    if (button.hasAttribute('data-fill')) {
+      if (!input) return;
+      input.value = value;
+      grow();
+      input.focus();
+      input.setSelectionRange?.(value.length, value.length);
+      const body = row?.parentElement;
+      if (row && body) for (const tr of body.rows) if (tr.dataset.key === row.dataset.key) tr.classList.add('ct-tr--editing');
+      return;
+    }
+    if (pressed.has(button)) return;
+    pressed.add(button);
+    const holder = button.closest('td') || button;
+    const owner = button.closest('.ct-pinned, .ct-msg[data-id]');
+    const label = button.getAttribute('aria-label') || button.textContent.trim();
+    const sending = send(value);
+    later(() => {
+      if (!holder.isConnected) return;
+      const hadFocus = holder.contains(document.activeElement);
+      const pending = fragment(`<span class="ct-reply-pending">${CLOCK_ICON}${escapeHtml(label)}</span>`);
+      if (holder === button) button.replaceWith(pending);
+      else holder.replaceChildren(pending);
+      // the button is gone: the focus goes to the box, as after Send (on a phone the keyboard stays closed)
+      if (hadFocus && !globalThis.matchMedia?.('(pointer: coarse)').matches) input?.focus({ preventScroll: true });
+    }, 0);
+    // not sent: the message is drawn again, with its buttons
+    sending.then((sent) => {
+      if (sent && sent.state !== 'failed') return;
+      if (owner?.classList.contains('ct-pinned')) {
+        if (owner.isConnected) drawPinned();
+      } else if (owner?.isConnected) {
+        const m = messages.find((x) => sameId(x.id, owner.dataset.id));
+        if (m) redraw(m.id, m);
+      }
+    });
   }
 
   /** A click on Send leaves the focus (and a phone's keyboard) in the box. */
@@ -1476,13 +1860,16 @@ function createChat(el, options = {}) {
       emit({ type: 'append', message: m });
       return m;
     },
-    /** Changes one message in place, e.g. `{ state: 'read' }` or a streamed `{ text }`. */
+    /**
+     * Changes one message in place, e.g. `{ state: 'read' }` or a streamed `{ text }`. A pinned
+     * message is rewritten in its bar, and its first text stays as `original`.
+     */
     updateMessage(id, patch = {}) {
       const index = messages.findIndex((m) => sameId(m.id, id));
       if (index < 0) return null;
-      const m = normalizeMessage({ ...messages[index], ...patch, id: messages[index].id });
+      const m = reviseMessage(messages[index], patch);
       messages[index] = m;
-      redraw(id, m);
+      show(m);
       return m;
     },
     /** Replaces the whole list and/or the indicators: `{ messages?, typing?, waiting? }`. */
@@ -1502,6 +1889,13 @@ function createChat(el, options = {}) {
       waiting = value || false;
       drawIndicators();
     },
+    /** A resolved thread: the pinned message reads "Final" and its buttons stop answering. */
+    setResolved(value) {
+      if (resolved === (value === true)) return;
+      resolved = value === true;
+      drawPinned();
+    },
+    get resolved() { return resolved; },
     /** Loads the messages from the store again. */
     async reload() {
       if (!opts.store) return messages;
@@ -1591,7 +1985,7 @@ function listStore(read, write) {
       const data = read();
       const i = find(data, id);
       if (i < 0) throw new Error('message not found');
-      data.messages[i] = normalizeMessage({ ...data.messages[i], ...patch, id: data.messages[i].id });
+      data.messages[i] = reviseMessage(data.messages[i], patch);
       write(data);
       return data.messages[i];
     },
@@ -1832,6 +2226,11 @@ function createThreads(el, options = {}) {
     x.toggle.setAttribute('aria-expanded', String(x.open));
     const act = (label, cls, icon) => `<button type="button" class="ct-th-ic ${cls}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">${icon}</button>`;
     x.acts.innerHTML = (canRename ? act(s.rename, 'ct-th-rename', ICONS.rename) : '') + (resolved ? act(s.reopen, 'ct-th-reopen', ICONS.reopen) : act(s.resolve, 'ct-th-resolve', ICONS.resolve)) + ICONS.chevron;
+    // the pinned message reads "Final" once the thread is resolved
+    if (x.resolved !== resolved) {
+      x.resolved = resolved;
+      x.chat.setResolved(resolved);
+    }
     const busy = !resolved && t.tone === 'busy';
     if (x.typing !== busy) {
       x.typing = busy;
@@ -2017,6 +2416,7 @@ function createThreads(el, options = {}) {
       acts: node.querySelector('.ct-th-acts'),
       open: !!open,
       typing: false,
+      resolved: t.status === 'resolved',
     };
     const body = node.querySelector('.ct-th-body');
     body.id = `ct-th-${String(t.id).replace(/[^\w-]/g, '_')}-${Math.random().toString(36).slice(2, 7)}`;
@@ -2024,6 +2424,7 @@ function createThreads(el, options = {}) {
     x.chat = createChat(node.querySelector('.ct-th-chat'), {
       ...chatOpts,
       messages: x.t.messages,
+      resolved: x.resolved,
       onSend: (text, info) => o.onSend?.(x.t.id, text, info),
       onChange: () => {
         if (!x.chat) return;
@@ -2219,5 +2620,5 @@ function createThreads(el, options = {}) {
   return api;
 }
 
-global.ChatThread = { createChat, restStore, memoryStore, localStore, LIMITS, STATES, FORMATS, MODES, KINDS, DEFAULT_STRINGS, ATTACH, DEFAULTS, resolveOptions, safeUrl, escapeHtml, linkify, renderMarkdown, renderWhatsApp, renderPlain, formatText, normalizeAt, dayKey, formatTime, dayLabel, normalizeMessage, normalizeChips, normalizeToggles, normalizeAttach, isLong, authorTone, fill, renderMessage, renderDay, renderTyping, renderWaiting, renderList, renderComposer, renderThread, THREAD_STRINGS, THREAD_MODES, threadTitle, THREAD_HEADERS, createThreads };
+global.ChatThread = { createChat, restStore, memoryStore, localStore, LIMITS, STATES, FORMATS, MODES, KINDS, DEFAULT_STRINGS, ATTACH, DEFAULTS, resolveOptions, safeUrl, escapeHtml, linkify, renderMarkdown, renderWhatsApp, renderPlain, formatText, normalizeAt, dayKey, formatTime, dayLabel, normalizeMessage, keepOriginal, reviseMessage, pinnedOf, normalizeChips, normalizeToggles, normalizeAttach, isLong, authorTone, fill, renderMessage, renderPinned, renderDay, renderTyping, renderWaiting, renderList, renderComposer, renderThread, THREAD_STRINGS, THREAD_MODES, threadTitle, THREAD_HEADERS, createThreads };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

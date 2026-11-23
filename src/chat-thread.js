@@ -18,8 +18,8 @@
  * script only hydrates it (`hydrate: true`), with the options the server wrote into it.
  */
 import {
-  dayKey, escapeHtml, normalizeMessage, renderDay, renderList, renderMessage, renderThread, renderTyping,
-  renderWaiting, resolveOptions,
+  dayKey, escapeHtml, keepOriginal, normalizeMessage, pinnedOf, renderDay, renderList, renderMessage, renderPinned,
+  renderThread, renderTyping, renderWaiting, resolveOptions, reviseMessage,
 } from './core.js';
 
 export * from './core.js';
@@ -29,6 +29,9 @@ let sequence = 0;
 
 const reportError = (err) => console.error('[chat-thread]', err);
 const sameId = (a, b) => String(a) === String(b);
+const CLOCK_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 8v4l3 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
+/** The key of a message's id as `data-id` writes it ('' for none), to compare ids that may be numbers or strings. */
+const idKey = (m) => (m ? (m.id === null || m.id === undefined ? '' : String(m.id)) : null);
 const CLOSE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
 
 function fragment(html) {
@@ -115,6 +118,9 @@ export function createChat(el, options = {}) {
   let messages = (given.messages || []).map(normalizeMessage);
   let typing = given.typing || false;
   let waiting = given.waiting || false;
+  let resolved = given.resolved === true;
+  let pinView = 'current';         // the pinned message's view: current, original or source
+  let pinnedKey = null;            // the id of the message in the pinned bar (idKey), null for none
   let list = null;
   let input = null;
   let sendButton = null;
@@ -125,6 +131,7 @@ export function createChat(el, options = {}) {
   const painted = new WeakMap();   // the typing or waiting node -> the state it shows
   const removing = new WeakSet();  // queued messages whose × was already pressed
   const copied = new WeakMap();    // Copy button -> the timer that turns "Copied" back
+  const pressed = new WeakSet();   // reply buttons already pressed
 
   const later = (fn, ms) => {
     const t = setTimeout(() => { timers.delete(t); fn(); }, ms);
@@ -149,13 +156,16 @@ export function createChat(el, options = {}) {
   ];
 
   function mount(hydrate) {
-    if (!hydrate) place(fragment(renderThread(messages, opts, { typing, waiting })).firstElementChild);
+    if (!hydrate) place(fragment(renderThread(messages, opts, { typing, waiting, resolved })).firstElementChild);
     list = root.querySelector('.ct-list');
     input = root.querySelector('.ct-input');
     sendButton = root.querySelector('.ct-send');
     for (const [type, fn] of listeners) root.addEventListener(type, fn);
-    if (hydrate) adoptIndicators();
-    else markIndicators();
+    pinnedKey = idKey(pinnedOf(messages));
+    if (hydrate) {
+      adoptIndicators();
+      adoptPinned();
+    } else markIndicators();
     settle(root);
     grow();
   }
@@ -469,6 +479,101 @@ export function createChat(el, options = {}) {
     quietly(() => list.replaceChildren(fragment(renderList(messages, opts, { typing, waiting }))));
     markIndicators();
     settle(list);
+    pinnedKey = idKey(pinnedOf(messages));
+    drawPinned();
+  }
+
+  /* ---- the pinned message: above the box, rewritten in place ---- */
+  const pinnedNode = () => root?.querySelector(':scope > .ct-pinned') ?? null;
+
+  /** Draws the pinned bar again (or takes it away), keeping its view and the focus on its buttons. */
+  function drawPinned() {
+    const pin = pinnedOf(messages);
+    const node = pinnedNode();
+    if (!pin) {
+      // a bar a server drew for a message this script was not given stays: it cannot be drawn again
+      if (node && messages.some((m) => idKey(m) === (node.dataset.id ?? ''))) node.remove();
+      else if (node) markResolved(node);
+      return;
+    }
+    if (node && (node.dataset.id ?? '') !== idKey(pin)) pinView = 'current';
+    const focused = node?.contains(document.activeElement) ? document.activeElement.dataset.view : null;
+    const fresh = fragment(renderPinned(pin, opts, { resolved, view: pinView })).firstElementChild;
+    if (node) node.replaceWith(fresh);
+    else list.after(fresh);
+    pinView = fresh.dataset.view;
+    if (focused) fresh.querySelector(`.ct-pinned-view[data-view="${focused}"]`)?.focus();
+  }
+
+  /** "Pinned" or "Final" on a bar whose message this script does not know. */
+  function markResolved(node) {
+    const s = opts.strings;
+    node.classList.toggle('ct-pinned--final', resolved);
+    node.setAttribute('aria-label', resolved ? s.final : s.pinned);
+    const label = node.querySelector('.ct-pinned-label');
+    const hint = node.querySelector('.ct-pinned-hint');
+    if (label) label.textContent = resolved ? s.final : s.pinned;
+    if (hint) hint.textContent = resolved ? s.finalHint : s.pinnedHint;
+  }
+
+  /** A hydrated thread takes the bar the server drew: its view, and "Final" when it was resolved. */
+  function adoptPinned() {
+    const node = pinnedNode();
+    if (node) {
+      resolved = node.classList.contains('ct-pinned--final');
+      pinView = node.dataset.view || 'current';
+      if (pinnedKey === null) pinnedKey = node.dataset.id ?? '';
+    }
+    if (given.resolved !== undefined && resolved !== (given.resolved === true)) {
+      resolved = given.resolved === true;
+      drawPinned();
+    }
+  }
+
+  /** Shows the current text, the original or the markdown of the pinned message, without drawing it again. */
+  function setPinnedView(view) {
+    const node = pinnedNode();
+    if (!node) return;
+    const s = opts.strings;
+    const original = node.querySelector('.ct-pinned-original');
+    const v = view === 'original' && !original ? 'current' : view;
+    pinView = v;
+    node.dataset.view = v;
+    node.querySelector('.ct-pinned-body:not(.ct-pinned-original)').hidden = v !== 'current';
+    if (original) original.hidden = v !== 'original';
+    node.querySelector('.ct-pinned-source').hidden = v !== 'source';
+    for (const b of node.querySelectorAll('.ct-pinned-view')) {
+      const on = b.dataset.view === v;
+      b.setAttribute('aria-pressed', String(on));
+      b.textContent = on ? s.showCurrent : b.dataset.view === 'original' ? s.showOriginal : s.showSource;
+    }
+  }
+
+  /**
+   * Draws a new or changed message where it belongs. The pinned one is in the bar: when another
+   * message takes its place (or it is unpinned), the old one goes back to its place in the list.
+   */
+  function show(message) {
+    const key = idKey(pinnedOf(messages));
+    if (key !== pinnedKey) {
+      const old = pinnedKey;
+      pinnedKey = key;
+      if (old !== null && messages.some((m) => idKey(m) === old)) return drawList();
+      if (key !== null) {
+        const moved = [...list.querySelectorAll(':scope > .ct-msg[data-id]')].find((n) => n.dataset.id === key);
+        if (moved) {
+          moved.remove();
+          pruneDays();
+        }
+      }
+      drawPinned();
+      if (key === idKey(message)) return;
+    } else if (key !== null && key === idKey(message)) {
+      drawPinned();
+      return;
+    }
+    if (nodeOf(message.id)) redraw(message.id, message);
+    else insert(message);
   }
 
   const indicator = (cls) => list.querySelector(`:scope > .${cls}`);
@@ -647,13 +752,17 @@ export function createChat(el, options = {}) {
     return message;
   }
 
-  /** Puts a message in the thread: in place when its id is already on screen, at the end otherwise. */
+  /**
+   * Puts a message in the thread: in place when its id is already on screen, at the end otherwise.
+   * A new copy of a pinned message that brings no `original` keeps the one already known.
+   */
   function upsert(message) {
     const index = messages.findIndex((m) => sameId(m.id, message.id));
-    if (index >= 0) messages[index] = message;
-    else messages.push(message);   // new, or one the server drew and this script now knows
-    if (nodeOf(message.id)) redraw(message.id, message);
-    else insert(message);
+    if (index >= 0) {
+      if (message.original === null) message.original = keepOriginal(messages[index], message);
+      messages[index] = message;
+    } else messages.push(message);   // new, or one the server drew and this script now knows
+    show(message);
   }
 
   async function remove(node) {
@@ -751,6 +860,8 @@ export function createChat(el, options = {}) {
     else if (is('ct-img')) viewer.open(button);
     else if (is('ct-copy')) copy(button);
     else if (is('ct-remove')) remove(button.closest('.ct-msg'));
+    else if (is('ct-pinned-view')) setPinnedView(button.getAttribute('aria-pressed') === 'true' ? 'current' : button.dataset.view);
+    else if (is('ct-reply')) reply(button);
     else if (is('ct-chip')) {
       const value = button.dataset.text || button.textContent;
       if (button.hasAttribute('data-fill') && input) {
@@ -761,6 +872,54 @@ export function createChat(el, options = {}) {
         send(value);
       }
     }
+  }
+
+  /**
+   * A button inside a message. `fill` puts its text in the box and marks the table row it is
+   * in (with the rows that continue it); `reply` sends its text like any message, and its cell
+   * shows it waiting until the message is rewritten. The cell changes after this click is over,
+   * so every other listener still finds the button where it was.
+   */
+  function reply(button) {
+    const value = button.dataset.text;
+    if (!value) return;
+    const row = button.closest('tr');
+    for (const tr of root.querySelectorAll('tr.ct-tr--editing')) tr.classList.remove('ct-tr--editing');
+    if (button.hasAttribute('data-fill')) {
+      if (!input) return;
+      input.value = value;
+      grow();
+      input.focus();
+      input.setSelectionRange?.(value.length, value.length);
+      const body = row?.parentElement;
+      if (row && body) for (const tr of body.rows) if (tr.dataset.key === row.dataset.key) tr.classList.add('ct-tr--editing');
+      return;
+    }
+    if (pressed.has(button)) return;
+    pressed.add(button);
+    const holder = button.closest('td') || button;
+    const owner = button.closest('.ct-pinned, .ct-msg[data-id]');
+    const label = button.getAttribute('aria-label') || button.textContent.trim();
+    const sending = send(value);
+    later(() => {
+      if (!holder.isConnected) return;
+      const hadFocus = holder.contains(document.activeElement);
+      const pending = fragment(`<span class="ct-reply-pending">${CLOCK_ICON}${escapeHtml(label)}</span>`);
+      if (holder === button) button.replaceWith(pending);
+      else holder.replaceChildren(pending);
+      // the button is gone: the focus goes to the box, as after Send (on a phone the keyboard stays closed)
+      if (hadFocus && !globalThis.matchMedia?.('(pointer: coarse)').matches) input?.focus({ preventScroll: true });
+    }, 0);
+    // not sent: the message is drawn again, with its buttons
+    sending.then((sent) => {
+      if (sent && sent.state !== 'failed') return;
+      if (owner?.classList.contains('ct-pinned')) {
+        if (owner.isConnected) drawPinned();
+      } else if (owner?.isConnected) {
+        const m = messages.find((x) => sameId(x.id, owner.dataset.id));
+        if (m) redraw(m.id, m);
+      }
+    });
   }
 
   /** A click on Send leaves the focus (and a phone's keyboard) in the box. */
@@ -817,13 +976,16 @@ export function createChat(el, options = {}) {
       emit({ type: 'append', message: m });
       return m;
     },
-    /** Changes one message in place, e.g. `{ state: 'read' }` or a streamed `{ text }`. */
+    /**
+     * Changes one message in place, e.g. `{ state: 'read' }` or a streamed `{ text }`. A pinned
+     * message is rewritten in its bar, and its first text stays as `original`.
+     */
     updateMessage(id, patch = {}) {
       const index = messages.findIndex((m) => sameId(m.id, id));
       if (index < 0) return null;
-      const m = normalizeMessage({ ...messages[index], ...patch, id: messages[index].id });
+      const m = reviseMessage(messages[index], patch);
       messages[index] = m;
-      redraw(id, m);
+      show(m);
       return m;
     },
     /** Replaces the whole list and/or the indicators: `{ messages?, typing?, waiting? }`. */
@@ -843,6 +1005,13 @@ export function createChat(el, options = {}) {
       waiting = value || false;
       drawIndicators();
     },
+    /** A resolved thread: the pinned message reads "Final" and its buttons stop answering. */
+    setResolved(value) {
+      if (resolved === (value === true)) return;
+      resolved = value === true;
+      drawPinned();
+    },
+    get resolved() { return resolved; },
     /** Loads the messages from the store again. */
     async reload() {
       if (!opts.store) return messages;
@@ -932,7 +1101,7 @@ function listStore(read, write) {
       const data = read();
       const i = find(data, id);
       if (i < 0) throw new Error('message not found');
-      data.messages[i] = normalizeMessage({ ...data.messages[i], ...patch, id: data.messages[i].id });
+      data.messages[i] = reviseMessage(data.messages[i], patch);
       write(data);
       return data.messages[i];
     },

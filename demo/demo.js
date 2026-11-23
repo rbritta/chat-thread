@@ -33,6 +33,58 @@ function live(name) {
 
 const chats = Object.fromEntries(['task', 'session', 'directions', 'reading', 'booking', 'reminders'].map((name) => [name, live(name)]));
 
+// Decisions in a table: the assistant keeps one pinned message and rewrites it as items are decided.
+// It writes markdown; the thread draws the table, its buttons and, on a phone, the cards.
+const review = data.decisions;
+const cell = (t) => String(t).replace(/\|/g, '\\|');
+function reviewText() {
+  const waiting = review.rows.filter((r) => r.waits).length;
+  const pencil = (r) => `[✎](fill:#${r.n} · "Adjust #${r.n}")`;
+  const action = (r) => (r.waits ? `[✓](reply:#${r.n} · Confirm "Confirm #${r.n}") ${pencil(r)}` : pencil(r));
+  const item = (r) => `*“${cell(r.said)}”*<br>${r.was ? `~~${cell(r.was)}~~<br>` : ''}**${cell(r.now)}**<br>${cell(r.why)}`;
+  const foot = (r) => (r.waits && r.suggest?.length ? [`| | | ${r.suggest.map((s) => `[${s}](reply:#${r.n} · ${s})`).join(' ')} ||`] : []);
+  const alone = review.alone.map((r) => `**${r.n}** *“${cell(r.said)}”* → ${r.now} ${pencil(r)}`).join(' · ');
+  return [
+    `**Card statement · ${review.day}** · ${waiting ? `${waiting} ${waiting > 1 ? 'wait' : 'waits'} for you` : 'nothing waits for you'}`,
+    '',
+    '| # | Time | Item | Action |',
+    '|--:|---|---|---|',
+    ...review.rows.flatMap((r) => [`| **${r.n}** | ${r.time} | ${item(r)} | ${action(r)} |`, ...foot(r)]),
+    '',
+    `Sorted out on my own (${review.alone.length}): ${alone}`,
+    '',
+    `${review.day}: ${review.items} items · ${review.rows.length} needed a look`,
+  ].join('\n');
+}
+{
+  const store = memoryStore(messagesOf('decisions'));
+  const pinned = { id: 'review', from: 'other', pinned: true, text: reviewText(), at: at([0, '09:00']) };
+  const chat = createChat(slot('decisions'), {
+    ...review.options,
+    store,
+    messages: [...store.load().messages, pinned],
+    // "#7 · Confirm" decides item 7; "#7 · something else" changes it, as typed
+    onChange(event) {
+      if (event.type !== 'send') return;
+      const [, n, said] = /^#(\d+) · ([\s\S]*)$/.exec(event.message.text.trim()) || [];
+      const row = review.rows.find((r) => r.n === Number(n)) || review.alone.find((r) => r.n === Number(n));
+      setTimeout(() => {
+        if (row && said) {
+          if (said !== 'Confirm' && !row.suggest?.includes(said)) {
+            row.was = row.now;
+            row.now = said;
+          }
+          if (said !== 'Confirm') row.why = `You said: ${said}.`;
+          row.waits = false;
+          chat.updateMessage('review', { text: reviewText() });
+        }
+        chat.append({ from: 'other', kind: 'note', text: row && said ? `Done: #${row.n} is decided.` : 'Start with the number, like **#7 · lunch**.', at: new Date().toISOString() });
+      }, 600);
+    },
+  });
+  chats.decisions = chat;
+}
+
 // Read-only, as a server would send it: a string from renderThread(), then hydrated for "Read more" and Copy.
 // The options travel in the markup (data-options), so hydrating needs none of them again.
 const log = slot('log');

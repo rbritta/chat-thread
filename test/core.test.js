@@ -4,8 +4,8 @@ import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import {
   DEFAULT_STRINGS, authorTone, dayKey, dayLabel, escapeHtml, formatTime, isLong, linkify, normalizeChips, normalizeMessage,
-  normalizeAttach, normalizeToggles, renderComposer, renderList, renderMarkdown, renderMessage, renderPlain, renderThread, renderTyping, renderWhatsApp,
-  resolveOptions, safeUrl,
+  normalizeAttach, normalizeToggles, renderComposer, renderList, renderMarkdown, renderMessage, renderPinned, renderPlain, renderThread, renderTyping, renderWhatsApp,
+  keepOriginal, pinnedOf, resolveOptions, reviseMessage, safeUrl,
 } from '../src/core.js';
 
 const UTC = { timeZone: 'UTC', locale: 'en-US' };
@@ -92,7 +92,7 @@ test('times and day labels follow the time zone and the locale', () => {
 
 test('normalizeMessage falls back on bad input instead of throwing', () => {
   const m = normalizeMessage({ id: '7', from: 'admin', kind: 'aside', text: 42, at: 'nope', state: 'lost', alert: 'yes', format: 'html', meta: [1] });
-  assert.deepEqual(m, { id: '7', from: 'other', kind: 'bubble', author: '', text: '42', at: null, state: null, alert: false, tag: '', title: '', format: null, meta: null, image: null });
+  assert.deepEqual(m, { id: '7', from: 'other', kind: 'bubble', author: '', text: '42', at: null, state: null, alert: false, tag: '', title: '', format: null, meta: null, image: null, pinned: false, original: null });
   assert.equal(normalizeMessage({ kind: 'note' }).kind, 'note');
   assert.equal(normalizeMessage({ id: 3, from: 'me' }).id, 3);
   assert.equal(normalizeMessage(null).from, 'other');
@@ -221,14 +221,16 @@ test('CSP-safe markup: no style attributes, no inline handlers, everything escap
     { from: 'me', text: evil, state: 'queued', id: 1 },
     { from: 'other', text: evil, format: 'whatsapp' },
     { from: 'other', kind: 'note', text: evil, title: evil, tag: evil, at: '2026-11-13T10:00:00Z' },
-  ], { author: evil, chips: [evil], toggles: [{ name: 'x', label: evil }], strings: { placeholder: evil } }, { typing: evil, waiting: evil });
+    { from: 'other', text: `| ${evil} | b |\n|---|---|\n| ${evil} | [${evil}](reply:${evil} "${evil}") |\n| | [x](fill:${evil}) |` },
+    { id: '"><i>', from: 'other', pinned: true, original: evil, title: evil, text: `| ${evil} | [✓](reply:${evil}) |\n|---|---|\n| ${evil} | ${evil} |` },
+  ], { author: evil, chips: [evil], toggles: [{ name: 'x', label: evil }], strings: { placeholder: evil, pinned: evil, showSource: evil } }, { typing: evil, waiting: evil });
   assert.doesNotMatch(html, /\sstyle="/);
   assert.doesNotMatch(html, /\son\w+="/);
   assert.doesNotMatch(html, /<script|<b>|javascript:x"/);
   // no attribute value lets a < or > through, and only the tags the library writes are there
   for (const [, value] of html.matchAll(/="([^"]*)"/g)) assert.doesNotMatch(value, /[<>]/);
   const tags = new Set([...html.matchAll(/<([a-z][\w-]*)/g)].map((m) => m[1]));
-  const ours = ['button', 'circle', 'code', 'del', 'div', 'em', 'i', 'input', 'label', 'p', 'path', 'pre', 'span', 'strong', 'svg', 'textarea', 'time'];
+  const ours = ['br', 'button', 'circle', 'code', 'del', 'div', 'em', 'i', 'input', 'label', 'p', 'path', 'pre', 'span', 'strong', 'svg', 'table', 'tbody', 'td', 'textarea', 'th', 'thead', 'time', 'tr'];
   assert.deepEqual([...tags].filter((t) => !ours.includes(t)), []);
 });
 
@@ -383,4 +385,105 @@ test('a photo in the bubble: a button with the picture before the text; only saf
   assert.match(html, /<button type="button" class="ct-img" aria-label="Ampliar" title="Ampliar"><img src="\/f\/1\.jpg\?a=1&amp;b=2" alt="x&quot;y" loading="lazy" decoding="async"><\/button><div class="ct-body">/);
   assert.match(html, /the shelf/);
   assert.doesNotMatch(renderMessage({ text: 'a' }), /ct-img/);
+});
+
+const TABLE = [
+  '| # | When | What | Decision | |',
+  '|:--|--:|:-:|---|---|',
+  '| 1 | 15:44 | Lunch \\| box | **done** ~~old~~ | [✓](reply:yes 1 "Confirm it") |',
+  '| | [Keep](reply:keep) [Write](fill:change 1 to) | | | |',
+  '| 2 | 16:00 | A<br>B || [✎](fill:item 2 "Edit") |',
+  '| 3 | *she said* |',
+].join('\n');
+
+test('a table (GFM): alignment, \\| as a pipe, <br> in a cell, || joins cells, and the rows fit the head', () => {
+  const html = renderMarkdown(TABLE);
+  assert.match(html, /^<div class="ct-table ct-table--cards"><table><thead><tr><th align="left">#<\/th><th align="right">When<\/th><th align="center">What<\/th><th>Decision<\/th><th><\/th><\/tr><\/thead><tbody>/);
+  assert.match(html, /<td data-col="What" align="center">Lunch \| box<\/td>/);
+  assert.match(html, /<td data-col="Decision"><strong>done<\/strong> <del>old<\/del><\/td>/);
+  assert.match(html, /<td data-col="What" align="center" colspan="2">A<br>B<\/td><td data-col="" class="ct-td--actions">/, '|| widens the cell on its left');
+  assert.match(html, /<tr data-key="3"><td data-col="#" align="left">3<\/td><td data-col="When" align="right"><em>she said<\/em><\/td><td data-col="What" align="center"><\/td><td data-col="Decision"><\/td><td data-col=""><\/td><\/tr>/, 'a short row is filled');
+  assert.equal(renderMarkdown('| a | b |\n|---|\n| 1 | 2 |'), '<p>| a | b |<br>|---|<br>| 1 | 2 |</p>', 'a delimiter row that does not fit the head is text');
+  assert.equal(renderMarkdown('| a | b |\n|---|---|'), '<div class="ct-table"><table><thead><tr><th>a</th><th>b</th></tr></thead></table></div>', 'two columns: no cards on a phone');
+  assert.match(renderMarkdown('before\n| a |\n|---|\n| 1 |\n\nafter'), /^<p>before<\/p><div class="ct-table">.*<\/div><p>after<\/p>$/);
+  assert.match(renderMarkdown('```\n| a |\n|---|\n```'), /<pre/, 'a fence is never a table');
+  const evil = renderMarkdown('| a |\n|---|\n| <b onclick="x">x</b> [y](javascript:z) <br/> <br> |');
+  assert.doesNotMatch(evil, /<b |onclick="|href="javascript/, 'a cell is escaped like any text');
+  assert.match(evil, /&lt;b onclick=&quot;x&quot;&gt;x&lt;\/b&gt; \[y\]\(javascript:z\) <br> <br><\/td>/, 'only <br> is read, as a line break');
+});
+
+test('the rows of a table: a row whose first cell is empty is the foot of the row above, and a row with reply: waits', () => {
+  const html = renderMarkdown(TABLE);
+  assert.match(html, /<tr data-key="1" class="ct-tr--waiting ct-tr--continued">/, 'the row has a foot after it and waits for an answer');
+  assert.match(html, /<tr data-key="1" class="ct-tr--foot ct-tr--waiting"><td data-col="#" align="left"><\/td><td data-col="When" align="right"><div class="ct-actions">/, 'the foot keeps the key; its suggestions are a row of pills');
+  assert.match(html, /<tr data-key="2"><td/, 'decided: no reply: on the row, no waiting');
+  assert.match(html, /<td data-col="" class="ct-td--actions">/, 'a cell of buttons is marked, for the cards');
+  assert.match(renderMarkdown('| a | b |\n|---|---|\n| | x |'), /<tr><td data-col="a"><\/td><td data-col="b">x<\/td><\/tr>/, 'with no row above, an empty first cell is an ordinary row');
+});
+
+test('buttons in a message: reply: sends, fill: writes in the box; ✓ and ✎ are icons; the hint names them', () => {
+  const html = renderMarkdown(TABLE, { replies: true });
+  assert.match(html, /<button type="button" class="ct-chip ct-reply ct-chip--icon" data-text="yes 1" title="Confirm it" aria-label="Confirm it"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12\.5/);
+  assert.match(html, /<button type="button" class="ct-chip ct-reply" data-text="keep">Keep<\/button>/);
+  assert.match(html, /<button type="button" class="ct-chip ct-reply" data-text="change 1 to " data-fill>Write<\/button>/, 'fill: ends in a space, ready to type on');
+  assert.match(html, /data-text="item 2 " data-fill title="Edit" aria-label="Edit"><svg/, 'the pencil');
+  assert.match(renderMarkdown('[x](reply:a\\) b "h\\"i")', { replies: true }), /data-text="a\) b" title="h&quot;i" aria-label="h&quot;i">x<\/button>/, '\\) and \\" are escapes');
+  assert.match(renderMarkdown('[Yes](reply:ok) <script>', { replies: true }), /^<p><button [^>]*>Yes<\/button> &lt;script&gt;<\/p>$/);
+  assert.match(renderMarkdown('`[a](reply:b)`', { replies: true }), /<code>\[a\]\(reply:b\)<\/code>/, 'never inside code');
+  // off: the same marks, but nothing to press
+  const off = renderMarkdown(TABLE);
+  assert.doesNotMatch(off, /<button/);
+  assert.match(off, /<span class="ct-chip ct-reply ct-chip--icon ct-reply--off" role="img" aria-label="Confirm it" title="Confirm it"><svg/);
+  assert.match(off, /<span class="ct-chip ct-reply ct-reply--off" data-fill>Write<\/span>/);
+});
+
+test('only the other side\'s messages answer, and only in a chat', () => {
+  const text = 'Pick: [Yes](reply:yes)';
+  assert.match(renderMessage({ from: 'other', text }), /<button type="button" class="ct-chip ct-reply" data-text="yes">Yes<\/button>/);
+  assert.match(renderMessage({ from: 'other', kind: 'note', text }), /<button type="button" class="ct-chip ct-reply"/);
+  assert.match(renderMessage({ from: 'me', text, format: 'markdown' }), /<span class="ct-chip ct-reply ct-reply--off">Yes<\/span>/, 'my own buttons are only marks');
+  assert.match(renderMessage({ from: 'other', text }, { mode: 'readonly' }), /ct-reply--off/);
+  assert.match(renderMessage({ from: 'other', text }, { mode: 'preview' }), /ct-reply--off/);
+  assert.match(renderMessage({ from: 'other', text, format: 'plain' }), /\[Yes\]\(reply:yes\)/, 'plain text stays text');
+});
+
+test('the pinned message: above the box, out of the list; "Final" when resolved; the original and the markdown', () => {
+  const pin = { id: 'p', from: 'other', pinned: true, text: '| a | b |\n|---|---|\n| 1 | [✓](reply:y "Yes") |', original: 'first' };
+  const html = renderPinned(pin, {});
+  assert.match(html, /^<div class="ct-pinned" role="region" aria-label="Pinned" data-id="p" data-view="current"><div class="ct-pinned-head"><span class="ct-pinned-label">Pinned<\/span><span class="ct-pinned-hint">Rewritten in place as things are decided<\/span><button type="button" class="ct-pinned-view" data-view="original" aria-pressed="false">See the original<\/button><button type="button" class="ct-pinned-view" data-view="source" aria-pressed="false">See the markdown<\/button><\/div>/);
+  assert.match(html, /<div class="ct-body ct-pinned-body"><div class="ct-table">.*<button type="button" class="ct-chip ct-reply ct-chip--icon" data-text="y"/);
+  assert.match(html, /<div class="ct-body ct-pinned-body ct-pinned-original" hidden><p>first<\/p><\/div><pre class="ct-pinned-source" hidden>\| a \| b \|\n\|---\|---\|\n\| 1 \| \[✓\]\(reply:y &quot;Yes&quot;\) \|<\/pre><\/div>$/);
+  const final = renderPinned(pin, {}, { resolved: true });
+  assert.match(final, /^<div class="ct-pinned ct-pinned--final" role="region" aria-label="Final"/);
+  assert.match(final, /<span class="ct-pinned-label">Final<\/span><span class="ct-pinned-hint">Resolved: this is where it ended<\/span>/);
+  assert.doesNotMatch(final, /<button type="button" class="ct-chip/, 'resolved: nothing left to answer');
+  const source = renderPinned(pin, {}, { view: 'source' });
+  assert.match(source, /data-view="source"><div class="ct-pinned-head">.*aria-pressed="true">See the current one<\/button><\/div><div class="ct-body ct-pinned-body" hidden>.*<pre class="ct-pinned-source">/);
+  assert.doesNotMatch(renderPinned({ ...pin, original: pin.text }, {}), /data-view="original"|ct-pinned-original/, 'no original button while the text is the first one');
+  assert.match(renderPinned({ ...pin, original: null }, {}, { view: 'original' }), /data-view="current"><div/, 'no original to show: the current one');
+  assert.match(renderPinned(pin, { strings: { pinned: 'Fixada', showSource: 'Ver o MD' } }), /<span class="ct-pinned-label">Fixada<\/span>.*>Ver o MD<\/button>/);
+  assert.match(renderPinned(pin, { mode: 'readonly' }), /ct-reply--off/, 'a log has nothing to answer');
+  // in the thread: drawn between the list and the box, and only the last pinned one
+  const thread = renderThread([{ id: 1, from: 'other', pinned: true, text: 'old' }, { id: 2, from: 'other', text: 'hi' }, pin], {}, { resolved: true });
+  assert.match(thread, /<div class="ct-list" role="log"[^>]*>.*<\/div><div class="ct-pinned ct-pinned--final"[^>]*data-id="p".*<\/div><div class="ct-composer/s);
+  assert.doesNotMatch(thread, /<div class="ct-msg[^"]*" data-id="p"/, 'the pinned one is not in the list too');
+  assert.match(thread, /<div class="ct-msg ct-msg--theirs" data-id="1"/, 'an older pinned one stays in the list');
+  assert.doesNotMatch(renderThread([{ id: 2, text: 'hi' }], {}), /ct-pinned/);
+});
+
+test('pinned and original: the first text of a pinned message is kept through its rewrites', () => {
+  assert.deepEqual([normalizeMessage({ pinned: 'yes' }).pinned, normalizeMessage({ pinned: true }).pinned, normalizeMessage({ original: 3 }).original], [false, true, null]);
+  assert.equal(pinnedOf([{ id: 1, pinned: true }, { id: 2 }, { id: 3, pinned: true }, { id: 4 }]).id, 3);
+  assert.equal(pinnedOf([{ id: 1 }]), null);
+  assert.equal(pinnedOf(null), null);
+  const a = reviseMessage({ id: 1, from: 'other', pinned: true, text: 'a' }, { text: 'b' });
+  assert.deepEqual([a.id, a.text, a.original], [1, 'b', 'a']);
+  const b = reviseMessage(a, { text: 'c', id: 9 });
+  assert.deepEqual([b.id, b.text, b.original], [1, 'c', 'a'], 'the first text stays; the id never changes');
+  assert.equal(reviseMessage({ id: 1, text: 'a' }, { text: 'b' }).original, null, 'not pinned: nothing kept');
+  assert.equal(reviseMessage({ id: 1, text: 'a' }, { text: 'b', pinned: true }).original, 'a', 'pinned by the change itself');
+  assert.equal(reviseMessage(a, { original: null }).original, null, 'the app may forget it');
+  assert.equal(reviseMessage(a, { original: 'z' }).original, 'z', 'or set it');
+  assert.equal(reviseMessage(a, { state: 'read' }).original, 'a', 'another field leaves it');
+  assert.equal(keepOriginal({ pinned: true, text: 'a' }, { text: 'a' }), null, 'the same text is no rewrite');
 });

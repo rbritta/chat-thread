@@ -195,6 +195,11 @@ export function createThreads(el, options = {}) {
     x.toggle.setAttribute('aria-expanded', String(x.open));
     const act = (label, cls, icon) => `<button type="button" class="ct-th-ic ${cls}" aria-label="${escapeHtml(label)}" title="${escapeHtml(label)}">${icon}</button>`;
     x.acts.innerHTML = (canRename ? act(s.rename, 'ct-th-rename', ICONS.rename) : '') + (resolved ? act(s.reopen, 'ct-th-reopen', ICONS.reopen) : act(s.resolve, 'ct-th-resolve', ICONS.resolve)) + ICONS.chevron;
+    // the pinned message reads "Final" once the thread is resolved
+    if (x.resolved !== resolved) {
+      x.resolved = resolved;
+      x.chat.setResolved(resolved);
+    }
     const busy = !resolved && t.tone === 'busy';
     if (x.typing !== busy) {
       x.typing = busy;
@@ -380,6 +385,7 @@ export function createThreads(el, options = {}) {
       acts: node.querySelector('.ct-th-acts'),
       open: !!open,
       typing: false,
+      resolved: t.status === 'resolved',
     };
     const body = node.querySelector('.ct-th-body');
     body.id = `ct-th-${String(t.id).replace(/[^\w-]/g, '_')}-${Math.random().toString(36).slice(2, 7)}`;
@@ -387,6 +393,7 @@ export function createThreads(el, options = {}) {
     x.chat = createChat(node.querySelector('.ct-th-chat'), {
       ...chatOpts,
       messages: x.t.messages,
+      resolved: x.resolved,
       onSend: (text, info) => o.onSend?.(x.t.id, text, info),
       onChange: () => {
         if (!x.chat) return;

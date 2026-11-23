@@ -52,6 +52,8 @@ await shot('log', { width: 1200, section: '#log .frame' });
 await shot('whatsapp', { width: 1200, section: '#previews .previews' });
 await shot('light', { width: 1200, section: '#themes .frame--light' });
 await lightAndDark('auto-light-dark', { width: 1200, section: '#themes .frame--auto' });
+await shot('decisions', { width: 1000, section: '#decisions .frame' });
+await shot('decisions-phone', { width: 360, height: 780, section: '#decisions .frame' });
 
 await browser.close();
 server.close();

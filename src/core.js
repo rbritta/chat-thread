@@ -46,6 +46,13 @@ export const DEFAULT_STRINGS = Object.freeze({
   close: 'Close',
   photo: 'Photo',
   enlarge: 'Enlarge photo',
+  pinned: 'Pinned',
+  final: 'Final',
+  pinnedHint: 'Rewritten in place as things are decided',
+  finalHint: 'Resolved: this is where it ended',
+  showOriginal: 'See the original',
+  showSource: 'See the markdown',
+  showCurrent: 'See the current one',
 });
 
 /** What the + left of the box can offer. Only `camera` for now: take a photo and send it with a caption. */
@@ -194,10 +201,52 @@ function markdownEmphasis(s) {
     .replace(/()~~(?=\S)([^\n]*?\S)~~/g, wrapIn('del'));
 }
 
-/** One line of markdown: `code`, [links](url), bare URLs, **bold**, *italic*, ~~strike~~. */
-function markdownInline(line) {
+const PENCIL_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>';
+const CHECK_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+/** Labels of a reply button that become the library's icons: the pencil and the check. */
+const REPLY_ICONS = { '✎': PENCIL_ICON, '✏': PENCIL_ICON, '✏️': PENCIL_ICON, '✓': CHECK_ICON, '✔': CHECK_ICON, '✔️': CHECK_ICON };
+
+// [label](reply:text "hint") and [label](fill:text "hint"); a backslash escapes ) and " in the text and the hint
+const REPLY_LINK = /\[([^\]\n]{1,500})\]\((reply|fill):((?:\\.|[^)"\\\n\u0000])*?)\s*(?:"((?:\\.|[^"\\\n\u0000])*)"\s*)?\)/g;
+const unescapeLink = (s) => s.replace(/\\(.)/g, '$1');
+
+/**
+ * A reply button inside a message: `reply:` sends its text, `fill:` puts it in the box (with a
+ * space at the end, to go on typing). A one-symbol label is a round icon (✎ and ✓ become the
+ * library's pencil and check) named by the hint. With `live` off (my own messages, a log, a
+ * resolved thread) it is the same chip as a span that does nothing.
+ */
+function replyButton(label, kind, rawText, rawHint, live) {
+  let text = clip(unescapeLink(rawText).trim(), LIMITS.chip);
+  if (!text) return null;
+  if (kind === 'fill') text += ' ';
+  const hint = clip(unescapeLink(rawHint || '').trim(), LIMITS.title);
+  const symbol = label.trim();
+  const icon = REPLY_ICONS[symbol];
+  const round = !!icon || [...symbol].length === 1;
+  const cls = `ct-chip ct-reply${round ? ' ct-chip--icon' : ''}`;
+  const name = hint || (round ? text.trim() : '');
+  const face = icon || markdownEmphasis(escapeHtml(label));
+  const fill = kind === 'fill' ? ' data-fill' : '';
+  if (!live) {
+    const named = name ? `${round ? ` role="img" aria-label="${escapeHtml(name)}"` : ''} title="${escapeHtml(name)}"` : '';
+    return `<span class="${cls} ct-reply--off"${fill}${named}>${face}</span>`;
+  }
+  const named = name ? ` title="${escapeHtml(name)}" aria-label="${escapeHtml(name)}"` : '';
+  return `<button type="button" class="${cls}" data-text="${escapeHtml(text)}"${fill}${named}>${face}</button>`;
+}
+
+/**
+ * One line of markdown: `code`, [links](url), bare URLs, **bold**, *italic*, ~~strike~~, and
+ * the reply buttons `[label](reply:text)` and `[label](fill:text)`, live when `replies` is on.
+ */
+function markdownInline(line, { replies = false } = {}) {
   const { keep, restore } = stasher();
   let s = line.replace(/`([^`\n]+)`/g, (_, code) => keep(`<code>${escapeHtml(code)}</code>`));
+  s = s.replace(REPLY_LINK, (whole, label, kind, text, hint) => {
+    const html = replyButton(label, kind, text, hint, replies);
+    return html ? keep(html) : whole;
+  });
   s = s.replace(/\[([^\]\n]{1,500})\]\(\s*([^)\s]+)\s*\)/g, (whole, label, url) => {
     const href = safeUrl(url);
     return href ? keep(anchor(href, markdownEmphasis(escapeHtml(label)))) : whole;
@@ -216,27 +265,140 @@ function codeBlock(code, lang, { copy, strings }) {
 const FENCE = /^ {0,3}(`{3,}|~{3,})[ \t]*([\w#+.-]{0,30})[^`]*$/;
 
 /**
- * A safe subset of markdown, as chat answers use it: paragraphs (single newlines kept),
- * `#` headings, `-` and `1.` lists, fenced code with a Copy button, `code`, **bold**,
- * *italic*, ~~strike~~, [links](url) and bare URLs. Raw HTML is always shown as text.
+ * The cells of a table row. `\|` is a pipe inside a cell; `||` (nothing between the bars)
+ * stretches the cell on its left over one more column, as MultiMarkdown does.
  */
-export function renderMarkdown(value, { copy = true, strings = DEFAULT_STRINGS } = {}) {
+function tableCells(row) {
+  let s = row.trim();
+  if (s.startsWith('|')) s = s.slice(1);
+  if (s.endsWith('|') && !s.endsWith('\\|')) s = s.slice(0, -1);
+  const parts = [''];
+  for (let k = 0; k < s.length; k++) {
+    if (s[k] === '\\' && s[k + 1] === '|') {
+      parts[parts.length - 1] += '|';
+      k++;
+    } else if (s[k] === '|') parts.push('');
+    else parts[parts.length - 1] += s[k];
+  }
+  const cells = [];
+  for (const part of parts) {
+    if (part === '' && cells.length) cells[cells.length - 1].span += 1;
+    else cells.push({ text: part.trim(), span: 1 });
+  }
+  return cells;
+}
+
+const DELIMITER = /^\s*:?-+:?\s*$/;
+
+/** The alignments of a table when `head` and `next` start one (GFM: a delimiter cell per column), else null. */
+function tableStart(head, next) {
+  if (!head.includes('|') || next === undefined || !next.includes('-')) return null;
+  const columns = tableCells(head).reduce((n, c) => n + c.span, 0);
+  const delimiters = tableCells(next);
+  if (delimiters.length !== columns || !delimiters.every((c) => c.span === 1 && DELIMITER.test(c.text))) return null;
+  return delimiters.map(({ text }) => {
+    const t = text.trim();
+    if (t.startsWith(':') && t.endsWith(':')) return 'center';
+    if (t.endsWith(':')) return 'right';
+    return t.startsWith(':') ? 'left' : '';
+  });
+}
+
+/** A row's cells brought to the table's columns: extra cells dropped, missing ones empty. */
+function fitCells(cells, columns) {
+  const out = [];
+  let used = 0;
+  for (const c of cells) {
+    if (used >= columns) break;
+    const span = Math.min(c.span, columns - used);
+    out.push({ ...c, span, col: used });
+    used += span;
+  }
+  while (used < columns) out.push({ text: '', span: 1, col: used++ });
+  return out;
+}
+
+/** A cell's words with no marks: the column names on a phone's cards and the row keys. */
+const plainCell = (text) => text.replace(/<br\s*\/?>[\s\S]*$/i, '').replace(/[*_`~]/g, '').trim();
+/** A cell: inline markdown, and `<br>` (the only HTML read, as GFM tables use it) for a line break. */
+const cellHtml = (text, ctx) => text.split(/<br\s*\/?>/i).map((piece) => markdownInline(piece, ctx)).join('<br>');
+
+/**
+ * A GFM table. A row whose first cell is empty continues the row above it: the same
+ * `data-key`, no line between them, the class `ct-tr--foot`, its cells' buttons in a row
+ * (`.ct-actions`). A row whose group has a `reply:` button waits for an answer (`ct-tr--waiting`).
+ */
+function renderTable(head, aligns, rows, ctx) {
+  const columns = aligns.length;
+  const align = (col) => (aligns[col] ? ` align="${aligns[col]}"` : '');
+  const span = (c) => (c.span > 1 ? ` colspan="${c.span}"` : '');
+  const header = fitCells(tableCells(head), columns);
+  const names = [];
+  for (const c of header) for (let k = 0; k < c.span; k++) names[c.col + k] = plainCell(c.text);
+  const body = rows.map((line) => fitCells(tableCells(line), columns));
+  // rows in groups: a row with its first cell filled, then the rows that continue it
+  const groups = [];
+  for (const cells of body) {
+    const foot = cells[0].text === '' && groups.length > 0;
+    if (foot) groups[groups.length - 1].rows.push(cells);
+    else groups.push({ key: plainCell(cells[0].text), rows: [cells] });
+  }
+  const waits = (cells) => cells.some((c) => /\]\(reply:/.test(c.text));
+  const tbody = groups.map((g) => {
+    const waiting = g.rows.some(waits);
+    return g.rows.map((cells, n) => {
+      const foot = n > 0;
+      const cls = [foot ? 'ct-tr--foot' : '', waiting ? 'ct-tr--waiting' : '', n < g.rows.length - 1 ? 'ct-tr--continued' : ''].filter(Boolean).join(' ');
+      const tds = cells.map((c) => {
+        const html = cellHtml(c.text, ctx);
+        const buttons = /\]\((?:reply|fill):/.test(c.text);
+        const inner = foot && c.text ? `<div class="ct-actions">${html}</div>` : html;
+        const tdClass = buttons && !foot ? ' class="ct-td--actions"' : '';
+        return `<td data-col="${escapeHtml(names[c.col] || '')}"${align(c.col)}${span(c)}${tdClass}>${inner}</td>`;
+      }).join('');
+      return `<tr${g.key ? ` data-key="${escapeHtml(g.key)}"` : ''}${cls ? ` class="${cls}"` : ''}>${tds}</tr>`;
+    }).join('');
+  }).join('');
+  const ths = header.map((c) => `<th${align(c.col)}${span(c)}>${cellHtml(c.text, ctx)}</th>`).join('');
+  return `<div class="ct-table${columns >= 3 ? ' ct-table--cards' : ''}"><table><thead><tr>${ths}</tr></thead>${tbody ? `<tbody>${tbody}</tbody>` : ''}</table></div>`;
+}
+
+/**
+ * A safe subset of markdown, as chat answers use it: paragraphs (single newlines kept),
+ * `#` headings, `-` and `1.` lists, GFM tables, fenced code with a Copy button, `code`,
+ * **bold**, *italic*, ~~strike~~, [links](url) and bare URLs. Raw HTML is always shown as
+ * text (only `<br>` inside a table cell breaks the line). With `replies`, `[label](reply:text)`
+ * and `[label](fill:text)` are buttons that answer (see `renderMessage`).
+ */
+export function renderMarkdown(value, { copy = true, strings = DEFAULT_STRINGS, replies = false } = {}) {
+  const ctx = { replies: replies === true };
+  const inline = (line) => markdownInline(line, ctx);
   const lines = clean(value).split('\n');
   const out = [];
   let para = [];
   let list = null;
   const flushPara = () => {
-    if (para.length) out.push(`<p>${para.map(markdownInline).join('<br>')}</p>`);
+    if (para.length) out.push(`<p>${para.map(inline).join('<br>')}</p>`);
     para = [];
   };
   const flushList = () => {
     if (!list) return;
     const start = list.type === 'ol' && list.start !== 1 ? ` start="${list.start}"` : '';
-    out.push(`<${list.type}${start}>${list.items.map((item) => `<li>${item.map(markdownInline).join('<br>')}</li>`).join('')}</${list.type}>`);
+    out.push(`<${list.type}${start}>${list.items.map((item) => `<li>${item.map(inline).join('<br>')}</li>`).join('')}</${list.type}>`);
     list = null;
   };
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
+    const aligns = tableStart(line, lines[i + 1]);
+    if (aligns) {
+      flushPara();
+      flushList();
+      const rows = [];
+      for (i += 2; i < lines.length && lines[i].trim() && lines[i].includes('|') && !FENCE.test(lines[i]); i++) rows.push(lines[i]);
+      i--;
+      out.push(renderTable(line, aligns, rows, ctx));
+      continue;
+    }
     const fence = FENCE.exec(line);
     if (fence) {
       flushPara();
@@ -253,7 +415,7 @@ export function renderMarkdown(value, { copy = true, strings = DEFAULT_STRINGS }
     if (heading) {
       flushPara();
       flushList();
-      out.push(`<p class="ct-heading">${markdownInline(heading[1])}</p>`);
+      out.push(`<p class="ct-heading">${inline(heading[1])}</p>`);
       continue;
     }
     const bullet = /^\s*[-*+]\s+(.*)$/.exec(line);
@@ -306,8 +468,8 @@ export function renderPlain(value) {
 }
 
 /** The body HTML of a text in one of `FORMATS`. */
-export function formatText(value, format = 'plain', { copy = true, strings = DEFAULT_STRINGS } = {}) {
-  if (format === 'markdown') return renderMarkdown(value, { copy, strings });
+export function formatText(value, format = 'plain', { copy = true, strings = DEFAULT_STRINGS, replies = false } = {}) {
+  if (format === 'markdown') return renderMarkdown(value, { copy, strings, replies });
   if (format === 'whatsapp') return renderWhatsApp(value);
   return renderPlain(value);
 }
@@ -413,7 +575,35 @@ export function normalizeMessage(input) {
     format: FORMATS.includes(m.format) ? m.format : null,
     meta: m.meta && typeof m.meta === 'object' && !Array.isArray(m.meta) ? m.meta : null,
     image: normalizeImage(m.image),
+    pinned: m.pinned === true,
+    original: typeof m.original === 'string' && m.original ? clip(m.original, LIMITS.text) : null,
   };
+}
+
+/**
+ * The `original` of a message after a change: the text a pinned message had before its first
+ * rewrite, kept from then on. `given` is the `original` the change itself brought: when it is
+ * not `undefined`, the app decided (a string, or `null` to forget it).
+ */
+export function keepOriginal(before, after, given) {
+  if (given !== undefined) return after.original;
+  if (before.original) return before.original;
+  return (before.pinned || after.pinned) && before.text && before.text !== after.text ? before.text : null;
+}
+
+/** A message with `patch` applied, as `updateMessage` and the stores do it: the id stays, and so does the first text of a pinned message. */
+export function reviseMessage(before, patch = {}) {
+  const prev = normalizeMessage(before);
+  const next = normalizeMessage({ ...prev, ...patch, id: prev.id });
+  next.original = keepOriginal(prev, next, patch.original);
+  return next;
+}
+
+/** The message the thread shows above the box: the last one with `pinned: true`, or null. */
+export function pinnedOf(messages) {
+  const list = Array.isArray(messages) ? messages : [];
+  for (let i = list.length - 1; i >= 0; i--) if (list[i]?.pinned === true) return list[i];
+  return null;
 }
 
 /** A picture inlined as base64 (what a camera preview makes), up to 1 MB. Never SVG: it can carry script. */
@@ -517,7 +707,8 @@ export function renderMessage(input, options) {
   const author = name ? authorLabel(name, o) : '';
   const title = m.title ? `<p class="ct-title">${escapeHtml(m.title)}</p>` : '';
 
-  let body = formatText(m.text, format, { copy: o.copy, strings: s });
+  // buttons inside a message answer for me: only in the other side's messages, and only where I can send
+  let body = formatText(m.text, format, { copy: o.copy, strings: s, replies: !mine && o.mode === 'chat' });
   const image = m.image
     ? `<button type="button" class="ct-img" aria-label="${escapeHtml(s.enlarge)}" title="${escapeHtml(s.enlarge)}"><img src="${escapeHtml(m.image.src)}" alt="${escapeHtml(m.image.alt)}"${thumbSize(m.image)} loading="lazy" decoding="async"></button>`
     : '';
@@ -540,6 +731,35 @@ export function renderMessage(input, options) {
   const day = m.at ? ` data-day="${dayKey(m.at, o)}"` : '';
   if (image) classes.push('ct-msg--image');
   return `<div class="${classes.join(' ')}"${id}${day}>${author}${title}${image}${inner}</div>`;
+}
+
+const PIN_VIEWS = ['current', 'original', 'source'];
+
+/**
+ * The pinned message above the box: a head ("Pinned", or "Final" once the thread is
+ * `resolved`) with "See the original" (when the text changed since it was pinned) and "See
+ * the markdown", then the message's text. `view` is the one shown: `current`, `original` or
+ * `source`. Its reply buttons answer while the thread is open; resolved, they are only marks.
+ */
+export function renderPinned(input, options, { resolved = false, view = 'current' } = {}) {
+  const o = resolveOptions(options);
+  const s = o.strings;
+  const m = normalizeMessage(input);
+  const mine = m.from === 'me';
+  const format = m.format || (o.format === 'auto' ? (mine && m.kind !== 'note' ? 'plain' : 'markdown') : o.format);
+  const original = m.original && m.original !== m.text ? m.original : '';
+  const v = PIN_VIEWS.includes(view) && (view !== 'original' || original) ? view : 'current';
+  const live = !mine && o.mode === 'chat' && !resolved;
+  const body = (text, replies) => formatText(text, format, { copy: o.copy, strings: s, replies });
+  const hidden = (name) => (v === name ? '' : ' hidden');
+  const button = (name, label) => `<button type="button" class="ct-pinned-view" data-view="${name}" aria-pressed="${v === name}">${escapeHtml(v === name ? s.showCurrent : label)}</button>`;
+  const title = m.title ? `<p class="ct-title">${escapeHtml(m.title)}</p>` : '';
+  const id = m.id !== null ? ` data-id="${escapeHtml(String(m.id))}"` : '';
+  const head = `<div class="ct-pinned-head"><span class="ct-pinned-label">${escapeHtml(resolved ? s.final : s.pinned)}</span><span class="ct-pinned-hint">${escapeHtml(resolved ? s.finalHint : s.pinnedHint)}</span>${original ? button('original', s.showOriginal) : ''}${button('source', s.showSource)}</div>`;
+  return `<div class="ct-pinned${resolved ? ' ct-pinned--final' : ''}" role="region" aria-label="${escapeHtml(resolved ? s.final : s.pinned)}"${id} data-view="${v}">${head}`
+    + `<div class="ct-body ct-pinned-body"${hidden('current')}>${title}${body(m.text, live)}</div>`
+    + (original ? `<div class="ct-body ct-pinned-body ct-pinned-original"${hidden('original')}>${title}${body(original, false)}</div>` : '')
+    + `<pre class="ct-pinned-source"${hidden('source')}>${escapeHtml(m.text)}</pre></div>`;
 }
 
 /** The day separator before the first message of each day. */
@@ -587,13 +807,16 @@ function typingKindOf(messages, o) {
 /**
  * The inside of `.ct-list`: day separators, bubbles, then the typing and waiting lines.
  * `state` is `{ typing, waiting }`, each `false`, `true` (the thread's `author`) or a name.
+ * The pinned message (the last one with `pinned: true`) is not in the list: it is above the box.
  */
 export function renderList(messages = [], options = {}, state = {}) {
   const o = resolveOptions(options);
   const list = (Array.isArray(messages) ? messages : []).map(normalizeMessage);
+  const pinned = pinnedOf(list);
   const parts = [];
   let last = '';
   for (const m of list) {
+    if (m === pinned) continue;
     const key = o.days && m.at ? dayKey(m.at, o) : '';
     if (key && key !== last) {
       parts.push(renderDay(key, o));
@@ -649,13 +872,15 @@ function carriedOptions(o) {
 /**
  * A whole thread as an HTML string: what a server sends, and what `createChat` draws.
  * Modes: `chat` (with the box), `readonly` (no box) and `preview` (no box, no day separators).
+ * `state` is `{ typing, waiting, resolved }`: `resolved` turns the pinned message's "Pinned" into "Final".
  */
 export function renderThread(messages = [], options = {}, state = {}) {
   const o = resolveOptions(options);
+  const pinned = pinnedOf((Array.isArray(messages) ? messages : []).map(normalizeMessage));
   const classes = ['ct'];
   if (o.theme !== 'dark') classes.push(`ct--${o.theme}`);
   if (o.mode !== 'chat') classes.push(`ct--${o.mode}`);
   const carried = carriedOptions(o);
   const data = carried ? ` data-options="${escapeHtml(carried)}"` : '';
-  return `<div class="${classes.join(' ')}" data-mode="${o.mode}"${data}><div class="ct-list" role="log" aria-label="${escapeHtml(o.strings.thread)}">${renderList(messages, o, state)}</div>${o.mode === 'chat' ? renderComposer(o) : ''}</div>`;
+  return `<div class="${classes.join(' ')}" data-mode="${o.mode}"${data}><div class="ct-list" role="log" aria-label="${escapeHtml(o.strings.thread)}">${renderList(messages, o, state)}</div>${pinned ? renderPinned(pinned, o, { resolved: state.resolved === true }) : ''}${o.mode === 'chat' ? renderComposer(o) : ''}</div>`;
 }

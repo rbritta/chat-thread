@@ -27,6 +27,7 @@
       <a href="#log">Read-only log</a>
       <a href="#previews">WhatsApp previews</a>
       <a href="#themes">Light and auto</a>
+      <a href="#decisions">Decisions in a table</a>
       <a href="https://github.com/rbritta/chat-thread">GitHub</a>
     </nav>
   </header>
@@ -138,6 +139,15 @@
         </div>
       </div>
     </section>
+
+    <section id="decisions" class="demo demo--wide">
+      <h2>Decisions in a table <small>pinned · rewritten in place · buttons in the message · cards on a phone</small></h2>
+      <p class="note">An assistant reviews a card statement and keeps one message, <code>pinned: true</code>, above the box: a markdown table it rewrites as each item is decided. In it, <code>[✓](reply:…)</code> sends an answer and <code>[✎](fill:…)</code> writes one in the box and marks its row; the dashed pills under an item are the assistant's suggestions. A row that waits for you is tinted, and the pencil turns green once its row is decided. <em>See the original</em> shows the first version, <em>See the markdown</em> what the assistant wrote. On a phone the table becomes cards.</p>
+      <div class="frame frame--dev">
+        <div class="frame-head">Review · Card statement</div>
+        <div class="frame-body"><div data-thread="decisions"></div></div>
+      </div>
+    </section>
   </main>
 
   <footer class="foot">MIT · <a href="https://github.com/rbritta/chat-thread">github.com/rbritta/chat-thread</a> · <a href="https://github.com/rbritta/chat-thread#use-it">Use it</a></footer>
@@ -233,6 +243,74 @@
         { "from": "other", "kind": "note", "when": [1, "18:52"], "text": "Open times this week:\n\n- Thursday, 9:30\n- Friday, 11:00\n- Monday, 8:00" },
         { "from": "me", "when": [0, "08:10"], "state": "read", "text": "Friday 11:00" },
         { "from": "other", "kind": "note", "alert": true, "when": [0, "08:10"], "text": "Friday at 11:00 was just taken. The closest one is **Friday at 11:30**: should I book it?" }
+      ]
+    },
+    "decisions": {
+      "options": {
+        "theme": "auto",
+        "author": "Assistant",
+        "strings": {
+          "placeholder": "Answer the review"
+        }
+      },
+      "day": "Nov 12",
+      "items": 14,
+      "rows": [
+        {
+          "n": 4,
+          "time": "09:14",
+          "said": "coffee with the team",
+          "now": "Café Norte · $18.40",
+          "why": "Two charges a minute apart: I kept one.",
+          "waits": true,
+          "suggest": [
+            "Keep both",
+            "It was a refund"
+          ]
+        },
+        {
+          "n": 7,
+          "time": "12:30",
+          "said": "lunch",
+          "was": "Restaurant · $32.00",
+          "now": "Groceries · $32.00",
+          "why": "The shop is a market, not a restaurant.",
+          "waits": true,
+          "suggest": [
+            "It was lunch"
+          ]
+        },
+        {
+          "n": 11,
+          "time": "18:05",
+          "said": "parking",
+          "now": "Transport · $6.00",
+          "why": "Same garage as every Tuesday; you confirmed it last week.",
+          "waits": false
+        }
+      ],
+      "alone": [
+        {
+          "n": 2,
+          "said": "bus",
+          "now": "$2.75"
+        },
+        {
+          "n": 9,
+          "said": "books",
+          "now": "$41.90"
+        }
+      ],
+      "messages": [
+        {
+          "from": "me",
+          "when": [
+            0,
+            "08:58"
+          ],
+          "state": "read",
+          "text": "review yesterday's card statement"
+        }
       ]
     },
     "scheduled": {

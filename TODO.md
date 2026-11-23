@@ -10,7 +10,8 @@ Ideas that are not built yet, roughly in order. Open an issue before starting a 
 - [ ] More behind the +: a photo from the gallery, a file card in the bubble.
 - [ ] Reply to a message (the quoted bubble on top) and reactions.
 - [ ] A `system` kind: a short centered line ("Dana joined", "Moved to Friday").
-- [ ] Markdown tables and quotes.
+- [x] Markdown tables (0.10.0), with buttons in the message and a pinned message above the box.
+- [ ] Markdown quotes.
 - [ ] Publish to npm once the API has settled on real use.
 
 ## Found by moving six real conversation screens onto chat-thread (2026-11-14)

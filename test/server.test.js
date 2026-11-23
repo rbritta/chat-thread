@@ -86,6 +86,49 @@ test('kind: notes are stored and drawn without a bubble; a 0.1.0 table gets the 
   assert.equal(createSqliteStore(db).load('t').messages.length, 2, 'opening it again changes nothing');
 });
 
+test('pinned and original: the first text of a pinned message stays when it is rewritten; older tables get the columns', async () => {
+  const store = createSqliteStore(new DatabaseSync(':memory:'), { now: clock() });
+  const pin = store.add('t', { author: 'Assistant', pinned: true, text: '| # | What |\n|---|---|\n| 1 | [✓](reply:ok 1) |' });
+  const plain = store.add('t', { text: 'not pinned' });
+  assert.deepEqual([pin.pinned, pin.original, plain.pinned, plain.original], [true, null, false, null]);
+  const v2 = store.update('t', pin.id, { text: '| # | What |\n|---|---|\n| 1 | ok |' });
+  assert.deepEqual([v2.pinned, v2.original], [true, pin.text], 'the first rewrite keeps the text it had');
+  const v3 = store.update('t', pin.id, { text: 'v3' });
+  assert.deepEqual([v3.text, v3.original], ['v3', pin.text], 'later rewrites keep the first one');
+  assert.equal(store.update('t', pin.id, { state: 'read' }).original, pin.text);
+  assert.equal(store.update('t', plain.id, { text: 'changed' }).original, null, 'not pinned: nothing kept');
+  assert.equal(store.update('t', pin.id, { original: null }).original, null, 'the app may forget it');
+  assert.equal(store.update('t', pin.id, { pinned: false }).pinned, false);
+  assert.throws(() => store.add('t', { text: 'x', pinned: 'yes' }), /pinned must be/);
+  assert.throws(() => store.add('t', { text: 'x', original: 3 }), /original must be/);
+  const html = renderThread(store.load('t').messages, { timeZone: 'UTC' });
+  assert.doesNotMatch(html, /ct-pinned/, 'unpinned: back in the list');
+  store.update('t', plain.id, { pinned: true, text: 'pinned now' });
+  const pinnedHtml = renderThread(store.load('t').messages, { timeZone: 'UTC' }, { resolved: true });
+  assert.match(pinnedHtml, /<div class="ct-pinned ct-pinned--final"[^>]*data-id="2"[^>]*>.*<p>pinned now<\/p>.*<div class="ct-body ct-pinned-body ct-pinned-original" hidden><p>changed<\/p>/s);
+
+  // the browser writes as me, and never pins
+  await withServer(async ({ store: served, base }) => {
+    const sent = await restStore(`${base}/api/chat/t`).send({ text: 'pin me', pinned: true, original: 'x' });
+    assert.deepEqual([sent.pinned, sent.original], [false, null]);
+    assert.equal(served.load('t').messages[0].pinned, false);
+  });
+
+  // a table from before 0.10.0 gets the two columns, unpinned
+  const db = new DatabaseSync(':memory:');
+  db.exec(`CREATE TABLE chat_messages (id INTEGER PRIMARY KEY, thread TEXT NOT NULL, side TEXT NOT NULL DEFAULT 'other',
+    author TEXT NOT NULL DEFAULT '', text TEXT NOT NULL DEFAULT '', title TEXT NOT NULL DEFAULT '', tag TEXT NOT NULL DEFAULT '',
+    state TEXT, alert INTEGER NOT NULL DEFAULT 0, format TEXT, meta TEXT, kind TEXT NOT NULL DEFAULT 'bubble', at TEXT NOT NULL,
+    created_at TEXT NOT NULL, updated_at TEXT NOT NULL, removed_at TEXT)`);
+  db.exec(`INSERT INTO chat_messages (thread, text, at, created_at, updated_at) VALUES ('t', 'from 0.9.0', '2026-11-13T10:00:00.000Z', 'x', 'x')`);
+  const old = createSqliteStore(db);
+  assert.deepEqual(old.load('t').messages.map((m) => [m.text, m.pinned, m.original]), [['from 0.9.0', false, null]]);
+  const id = old.load('t').messages[0].id;
+  assert.equal(old.update('t', id, { pinned: true }).pinned, true);
+  assert.equal(old.update('t', id, { text: 'rewritten' }).original, 'from 0.9.0');
+  assert.equal(createSqliteStore(db).load('t').messages[0].original, 'from 0.9.0', 'opening it again changes nothing');
+});
+
 test('what the store returns renders straight into a thread', () => {
   const store = createSqliteStore(new DatabaseSync(':memory:'), { now: clock() });
   store.add('t', { from: 'me', text: 'hi' });

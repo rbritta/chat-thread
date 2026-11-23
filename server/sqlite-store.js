@@ -29,6 +29,8 @@ const COLUMNS = `
   alert INTEGER NOT NULL DEFAULT 0,
   format TEXT,
   meta TEXT,
+  pinned INTEGER NOT NULL DEFAULT 0,
+  original TEXT,
   at TEXT NOT NULL,
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL, removed_at TEXT`;
 
@@ -66,6 +68,8 @@ const fromRow = (r) => ({
   alert: r.alert === 1,
   format: r.format,
   meta: readMeta(r.meta),
+  pinned: r.pinned === 1,
+  original: r.original ?? null,
   at: r.at,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
@@ -112,6 +116,15 @@ function toColumns(patch, { creating = false } = {}) {
     if (typeof patch.alert !== 'boolean') throw new ValidationError('alert must be true or false');
     cols.alert = patch.alert ? 1 : 0;
   }
+  if (patch.pinned !== undefined) {
+    if (typeof patch.pinned !== 'boolean') throw new ValidationError('pinned must be true or false');
+    cols.pinned = patch.pinned ? 1 : 0;
+  }
+  if (patch.original !== undefined) {
+    if (patch.original !== null && typeof patch.original !== 'string') throw new ValidationError('original must be text');
+    if (patch.original && patch.original.length > LIMITS.text) throw new ValidationError(`original is longer than ${LIMITS.text} characters`);
+    cols.original = patch.original ? patch.original.replace(/\r\n?/g, '\n').replace(/\s+$/, '') || null : null;
+  }
   if (patch.at !== undefined) {
     const at = normalizeAt(patch.at);
     if (!at) throw new ValidationError('at must be a date');
@@ -129,9 +142,10 @@ function toColumns(patch, { creating = false } = {}) {
 export function createSqliteStore(db, { table = 'chat_messages', now = () => new Date().toISOString(), onChange = () => {} } = {}) {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(table)) throw new Error('invalid table name');
   db.exec(`CREATE TABLE IF NOT EXISTS ${table} (${COLUMNS})`);
-  // a table made by 0.1.0 has no kind column: every message in it was a bubble
-  if (!db.prepare(`PRAGMA table_info(${table})`).all().some((c) => c.name === 'kind')) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN kind TEXT NOT NULL DEFAULT 'bubble'`);
+  // columns added after the table was made: kind in 0.2.0 (every message before it was a bubble), pinned and original in 0.10.0
+  const have = new Set(db.prepare(`PRAGMA table_info(${table})`).all().map((c) => c.name));
+  for (const [name, type] of [['kind', "TEXT NOT NULL DEFAULT 'bubble'"], ['pinned', 'INTEGER NOT NULL DEFAULT 0'], ['original', 'TEXT']]) {
+    if (!have.has(name)) db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${type}`);
   }
   db.exec(`CREATE INDEX IF NOT EXISTS ${table}_thread ON ${table}(thread, removed_at, id)`);
 
@@ -140,7 +154,11 @@ export function createSqliteStore(db, { table = 'chat_messages', now = () => new
   const run = (sql, ...args) => db.prepare(sql).run(...args);
   const byId = (thread, id) => one(`SELECT * FROM ${table} WHERE thread = ? AND id = ? AND removed_at IS NULL`, thread, Number(id));
 
-  /** Changes a message: `state`, `alert`, `text` (a streamed answer), `kind`, `tag`, `title`, `format`, `meta`; or `{ removed: true }`. */
+  /**
+   * Changes a message: `state`, `alert`, `text` (a streamed answer, or a pinned message rewritten), `kind`, `tag`,
+   * `title`, `format`, `meta`, `pinned`, `original`; or `{ removed: true }`. The first text a pinned message had
+   * stays in `original` when the text changes.
+   */
   function update(thread, id, patch = {}, { from } = {}) {
     checkThread(thread);
     const before = byId(thread, id);
@@ -154,6 +172,10 @@ export function createSqliteStore(db, { table = 'chat_messages', now = () => new
     }
     const { from: _side, ...rest } = patch;
     const cols = toColumns(rest);
+    const pinned = cols.pinned ?? before.pinned;
+    if (cols.text !== undefined && cols.original === undefined && !before.original && (pinned === 1 || before.pinned === 1) && before.text && cols.text !== before.text) {
+      cols.original = before.text;
+    }
     const names = Object.keys(cols);
     if (names.length) {
       run(`UPDATE ${table} SET ${names.map((c) => `${c} = ?`).join(', ')}, updated_at = ? WHERE id = ?`, ...names.map((c) => cols[c]), now(), before.id);

@@ -614,7 +614,7 @@ test('the box grows without scrolling the page back', async (t) => {
   if (!browser) return t.skip(skip);
   const { p, ctx } = await page(1200, 700);
   // a box already four lines tall, at the very bottom of the page: measuring it must not leave the page scrolled back
-  const box = p.locator(`${thread('reminders')} .ct-input`);
+  const box = p.locator(`${thread('decisions')} .ct-input`);
   await box.fill('one\ntwo\nthree\nfour');
   await p.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
   const before = await p.evaluate(() => window.scrollY);
@@ -836,7 +836,7 @@ test('the page switch repaints every thread and the page, the WhatsApp previews 
   const LIGHT = 'rgb(227, 249, 232)';
   const WHATSAPP = 'rgb(217, 253, 211)';
   const expected = (mine, page, frame) => ({
-    page, frame, task: mine, session: mine, directions: mine, reading: mine, log: mine, reminders: mine,
+    page, frame, task: mine, session: mine, directions: mine, reading: mine, log: mine, reminders: mine, decisions: mine,
     booking: LIGHT, reminder: WHATSAPP, scheduled: WHATSAPP,
   });
   assert.deepEqual(await paint(), expected(DARK, 'rgb(5, 7, 10)', 'rgb(13, 17, 23)'));
@@ -912,12 +912,15 @@ function measureThemes(p) {
       const fieldBg = over(getComputedStyle(field).backgroundColor, page);
       field.style.background = 'var(--ct-day)';
       const dayBg = over(getComputedStyle(field).backgroundColor, page);
+      // a row that waits for an answer, in the pinned bar
+      field.style.background = 'var(--ct-row-wait)';
+      const waitBg = over(getComputedStyle(field).backgroundColor, fieldBg);
       field.remove();
       return {
         name: `${ct.closest('[data-thread]')?.dataset.thread} (${ct.className})`,
         whatsapp: ct.classList.contains('ct--whatsapp'),
-        backgrounds: { mine: probe('ct-msg ct-msg--mine'), theirs: probe('ct-msg ct-msg--theirs'), page, field: fieldBg, day: dayBg },
-        colors: Object.fromEntries(['text', 'muted', 'link', 'author', 'title', 'tick', 'author-1', 'author-2', 'author-3', 'author-4', 'author-5', 'author-6'].map((n) => [n, color(n)])),
+        backgrounds: { mine: probe('ct-msg ct-msg--mine'), theirs: probe('ct-msg ct-msg--theirs'), page, field: fieldBg, day: dayBg, wait: waitBg },
+        colors: Object.fromEntries(['text', 'muted', 'link', 'author', 'title', 'tick', 'author-1', 'author-2', 'author-3', 'author-4', 'author-5', 'author-6', 'said', 'ok', 'warn'].map((n) => [n, color(n)])),
       };
     });
   });
@@ -937,9 +940,11 @@ test('every theme passes WCAG AA: text, muted text, links, names and titles on b
       // the read tick is an icon (3:1); WhatsApp's own blue is kept on purpose, its state is in the label
       if (!thread.whatsapp) for (const where of ['mine', 'page']) pairs.push(['tick', where]);
       pairs.push(['muted', 'field'], ['muted', 'day'], ['text', 'field']);
+      // a table: what someone said (italics) on a bubble and in the pinned bar; a waiting row; the ✓ and ✎ icons (3:1)
+      pairs.push(['said', 'theirs'], ['said', 'field'], ['said', 'wait'], ['muted', 'wait'], ['text', 'wait'], ['ok', 'field'], ['ok', 'theirs'], ['warn', 'wait']);
       const ratios = await contrastIn(p, pairs.map(([name, where]) => [thread.colors[name], thread.backgrounds[where]]));
       pairs.forEach(([name, where], i) => {
-        if (ratios[i] < (name === 'tick' ? 3 : 4.5)) failing.push(`${scheme} page, ${thread.name}: ${name} on ${where} = ${ratios[i].toFixed(2)}`);
+        if (ratios[i] < (['tick', 'ok', 'warn'].includes(name) ? 3 : 4.5)) failing.push(`${scheme} page, ${thread.name}: ${name} on ${where} = ${ratios[i].toFixed(2)}`);
       });
     }
   }
@@ -1062,3 +1067,190 @@ test('a photo in a bubble: a thumbnail that opens full size; Escape, the X or ou
     await ctx.close();
   }
 });
+
+/* ---- tables, buttons in a message, the pinned message ---- */
+
+const DECISIONS = thread('decisions');
+
+test('the pinned table: above the box and out of the list; fill writes in the box and marks the row; reply sends; rewritten in place', async (t) => {
+  if (!browser) return t.skip(skip);
+  const { p, ctx, errors } = await page();
+  const bar = p.locator(`${DECISIONS} .ct-pinned`);
+  const place = () => bar.evaluate((el) => [el.previousElementSibling.className, el.nextElementSibling.className, document.querySelectorAll('[data-thread="decisions"] .ct-list [data-id="review"]').length]);
+  assert.deepEqual(await place(), ['ct-list', 'ct-composer', 0]);
+  assert.equal(await bar.getAttribute('aria-label'), 'Pinned');
+  assert.equal(await bar.locator('tr.ct-tr--waiting').count(), 4, 'two items wait, each with its foot');
+  assert.equal(await bar.locator('.ct-pinned-view').count(), 1, 'no original yet: only See the markdown');
+
+  // ✎ writes "#7 · " in the box, puts the caret at its end and marks both rows of item 7
+  await bar.locator('button[aria-label="Adjust #7"]').click();
+  const box = p.locator(`${DECISIONS} .ct-input`);
+  assert.deepEqual(await box.evaluate((el) => [el.value, document.activeElement === el, el.selectionStart]), ['#7 · ', true, 5]);
+  assert.deepEqual(await bar.locator('tr.ct-tr--editing').evaluateAll((rows) => rows.map((r) => r.dataset.key)), ['7', '7']);
+  await bar.locator('button[aria-label="Adjust #11"]').click();
+  assert.deepEqual(await bar.locator('tr.ct-tr--editing').evaluateAll((rows) => rows.map((r) => r.dataset.key)), ['11'], 'one row at a time');
+
+  // ✓ sends "#4 · Confirm" as an ordinary message; its cell waits until the table is rewritten
+  const first = await bar.elementHandle();
+  await p.evaluate(() => { window.clicks = []; document.addEventListener('click', (e) => window.clicks.push(e.target.isConnected && !!e.target.closest('.ct-pinned')), { once: true }); });
+  await bar.locator('button[aria-label="Confirm #4"]').click();
+  assert.deepEqual(await p.evaluate(() => window.clicks), [true], 'other listeners still find the button');
+  await p.locator(`${DECISIONS} .ct-msg--mine`, { hasText: '#4 · Confirm' }).waitFor();
+  await bar.locator('.ct-reply-pending', { hasText: 'Confirm #4' }).waitFor();
+  await p.locator(`${DECISIONS} .ct-msg--note`, { hasText: 'Done: #4 is decided.' }).waitFor();
+  assert.equal(await first.evaluate((el) => el.isConnected), false, 'drawn again...');
+  assert.deepEqual(await place(), ['ct-list', 'ct-composer', 0], '...in the same place');
+  assert.match(await bar.locator('.ct-pinned-body').first().innerText(), /1 waits for you/);
+  const current = bar.locator('.ct-pinned-body:not(.ct-pinned-original)');
+  assert.equal(await current.locator('tr[data-key="4"]').count(), 1, 'decided: its foot of suggestions is gone');
+  assert.equal(await current.locator('tr[data-key="4"].ct-tr--waiting').count(), 0);
+  assert.equal(await bar.locator('.ct-reply-pending').count(), 0);
+
+  // the first version, and the markdown; the view stays through a rewrite
+  const views = () => bar.evaluate((el) => [el.dataset.view, ...[...el.querySelectorAll('.ct-pinned-body, .ct-pinned-source')].map((n) => !n.hidden), ...[...el.querySelectorAll('.ct-pinned-view')].map((b) => `${b.textContent}:${b.getAttribute('aria-pressed')}`)]);
+  await bar.locator('.ct-pinned-view[data-view="original"]').click();
+  assert.deepEqual(await views(), ['original', false, true, false, 'See the current one:true', 'See the markdown:false']);
+  assert.match(await bar.locator('.ct-pinned-original').innerText(), /2 wait for you/);
+  assert.equal(await bar.locator('.ct-pinned-original button').count(), 0, 'the original only shows its buttons');
+  await bar.locator('.ct-pinned-view[data-view="source"]').click();
+  assert.deepEqual(await views(), ['source', false, false, true, 'See the original:false', 'See the current one:true']);
+  assert.match(await bar.locator('.ct-pinned-source').innerText(), /\| \*\*7\*\* \| 12:30 \|.*\[✓\]\(reply:#7 · Confirm "Confirm #7"\)/);
+  await p.evaluate(() => window.demoChats.decisions.updateMessage('review', { text: '| a | b |\n|---|---|\n| 1 | 2 |' }));
+  assert.equal(await bar.getAttribute('data-view'), 'source', 'a rewrite keeps the view');
+  assert.equal(await bar.locator('.ct-pinned-source').innerText(), '| a | b |\n|---|---|\n| 1 | 2 |');
+  assert.equal(await bar.locator('.ct-pinned-view[data-view="source"]').evaluate((b) => document.activeElement === b), true, 'and the focus');
+  await bar.locator('.ct-pinned-view[data-view="source"]').click();
+  assert.deepEqual(await views(), ['current', true, false, false, 'See the original:false', 'See the markdown:false']);
+
+  // resolved: "Final", and nothing left to press
+  await p.evaluate(() => window.demoChats.decisions.updateMessage('review', { text: '| a | b |\n|---|---|\n| 1 | [✓](reply:ok "OK") |' }));
+  assert.equal(await bar.locator('button.ct-reply').count(), 1);
+  await p.evaluate(() => window.demoChats.decisions.setResolved(true));
+  assert.deepEqual(await bar.evaluate((el) => [el.className, el.getAttribute('aria-label'), el.querySelector('.ct-pinned-label').textContent, el.querySelectorAll('button.ct-reply').length]), ['ct-pinned ct-pinned--final', 'Final', 'Final', 0]);
+  await p.evaluate(() => window.demoChats.decisions.setResolved(false));
+  assert.equal(await bar.locator('button.ct-reply').count(), 1);
+
+  // unpinned, it goes back to its place in the list; pinned again, back to the bar
+  await p.evaluate(() => window.demoChats.decisions.updateMessage('review', { pinned: false }));
+  assert.equal(await bar.count(), 0);
+  assert.equal(await p.locator(`${DECISIONS} .ct-list [data-id="review"]`).count(), 1);
+  await p.evaluate(() => window.demoChats.decisions.updateMessage('review', { pinned: true }));
+  assert.deepEqual(await place(), ['ct-list', 'ct-composer', 0]);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('a reply button: one send per click, its cell waits, and a failed send brings the button back', async (t) => {
+  if (!browser) return t.skip(skip);
+  const { p, ctx, errors } = await page();
+  await installSandbox(p);
+  const found = await p.evaluate(async () => {
+    const sent = [];
+    let fail = true;
+    const { el, chat } = await window.sandbox({
+      onError: () => {},
+      onSend: async (text) => {
+        sent.push(text);
+        await new Promise((r) => setTimeout(r, 50));
+        if (fail) throw new Error('offline');
+        return { state: 'read' };
+      },
+      messages: [
+        { id: 1, from: 'other', text: '| Item | |\n|---|---|\n| Milk | [Yes](reply:milk yes) |' },
+        { id: 2, from: 'me', text: 'mine: [No](reply:no)', format: 'markdown' },
+      ],
+    });
+    const button = () => el.querySelector('[data-id="1"] button.ct-reply');
+    button().click();
+    button()?.click();
+    await new Promise((r) => setTimeout(r, 0));
+    const waiting = el.querySelector('[data-id="1"] .ct-reply-pending')?.textContent;
+    await new Promise((r) => setTimeout(r, 150));
+    const back = !!button();
+    fail = false;
+    button().click();
+    await new Promise((r) => setTimeout(r, 150));
+    return {
+      sent, waiting, back, after: el.querySelector('[data-id="1"] .ct-reply-pending')?.textContent,
+      mine: el.querySelector('[data-id="2"] .ct-reply').tagName, failed: el.querySelectorAll('.ct-msg--mine.ct-msg--alert').length, ok: chat.messages.filter((m) => m.text === 'milk yes').map((m) => m.state),
+    };
+  });
+  assert.deepEqual(found, { sent: ['milk yes', 'milk yes'], waiting: 'Yes', back: true, after: 'Yes', mine: 'SPAN', failed: 1, ok: ['failed', 'read'] });
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('a server-drawn pinned message: hydrated, its views, its buttons, and "Final" when the thread resolves', async (t) => {
+  if (!browser) return t.skip(skip);
+  const { p, ctx, errors } = await page();
+  await installSandbox(p);
+  const found = await p.evaluate(async () => {
+    const sent = [];
+    const pin = { id: 9, from: 'other', pinned: true, text: '| # | What |\n|---|---|\n| 1 | [✓](reply:1 ok "OK") |', original: 'the first one' };
+    const { el, chat } = await window.sandbox({ hydrate: true, onSend: (text) => { sent.push(text); } }, (lib) => lib.renderThread([{ id: 8, from: 'other', text: 'hi' }, pin], {}));
+    const bar = () => el.querySelector('.ct-pinned');
+    el.querySelector('.ct-pinned-view[data-view="original"]').click();
+    const view = [bar().dataset.view, el.querySelector('.ct-pinned-original').hidden];
+    el.querySelector('.ct-pinned-view[data-view="original"]').click();
+    bar().querySelector('button.ct-reply').click();
+    await new Promise((r) => setTimeout(r, 50));
+    chat.setResolved(true);
+    const final = [bar().className, bar().querySelector('.ct-pinned-label').textContent, bar().getAttribute('aria-label')];
+    // createThreads: the thread's status says it
+    const { createThreads } = await import('/src/chat-thread.js');
+    const holder = document.createElement('div');
+    document.querySelector('main').prepend(holder);
+    const box = createThreads(holder, { threads: [{ id: 'a', open: true, messages: [pin] }] });
+    const label = () => holder.querySelector('.ct-pinned-label')?.textContent;
+    const before = label();
+    box.upsert({ id: 'a', status: 'resolved' });
+    const resolved = [label(), box.chat('a').resolved];
+    box.upsert({ id: 'a', status: 'open' });
+    return { view, sent, final, before, resolved, reopened: label() };
+  });
+  assert.deepEqual(found, {
+    view: ['original', false], sent: ['1 ok'], final: ['ct-pinned ct-pinned--final', 'Final', 'Final'],
+    before: 'Pinned', resolved: ['Final', true], reopened: 'Pinned',
+  });
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+for (const scheme of ['dark', 'light']) {
+  test(`on a phone the table becomes cards, in ${scheme}, with no horizontal scroll`, async (t) => {
+    if (!browser) return t.skip(skip);
+    const { p, ctx, errors } = await page(390, 844, { colorScheme: scheme });
+    const bar = p.locator(`${DECISIONS} .ct-pinned`);
+    await bar.scrollIntoViewIfNeeded();
+    const found = await bar.evaluate((el) => {
+      const row = el.querySelector('tr[data-key="7"]:not(.ct-tr--foot)');
+      const [a, b, c, d] = [...row.cells].map((td) => td.getBoundingClientRect());
+      const foot = el.querySelector('tr.ct-tr--foot');
+      return {
+        head: getComputedStyle(el.querySelector('thead')).display,
+        hint: getComputedStyle(el.querySelector('.ct-pinned-hint')).display,
+        firstLine: Math.abs(a.top - b.top) < 2 && b.left > a.right - 1,
+        below: c.top >= a.bottom - 1 && d.top >= c.bottom - 1,
+        dot: getComputedStyle(row.cells[0], '::after').content,
+        labels: [...row.cells].map((td) => { const s = getComputedStyle(td, '::before'); return s.display === 'none' || !/^"/.test(s.content) ? '' : s.content; }),
+        footEmpty: [...foot.cells].filter((td) => !td.textContent).map((td) => getComputedStyle(td).display),
+        inside: [...el.querySelectorAll('td, button')].every((n) => n.getBoundingClientRect().right <= el.getBoundingClientRect().right + 0.5),
+        scroll: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      };
+    });
+    assert.deepEqual(found, {
+      head: 'none', hint: 'none', firstLine: true, below: true, dot: '" ·"',
+      labels: ['', '', '', ''], footEmpty: ['none', 'none'], inside: true, scroll: true,
+    });
+    // a fourth column with words has its name above it
+    const named = await p.evaluate(async () => {
+      const chat = window.demoChats.decisions;
+      chat.updateMessage('review', { text: '| # | Time | Item | Note |\n|---|---|---|---|\n| 1 | 09:00 | x | **kept** |' });
+      const td = document.querySelector('[data-thread="decisions"] .ct-pinned td[data-col="Note"]');
+      return [getComputedStyle(td, '::before').content, getComputedStyle(td, '::before').display];
+    });
+    assert.deepEqual(named, ['"Note"', 'block']);
+    assert.deepEqual(errors, []);
+    await ctx.close();
+  });
+}

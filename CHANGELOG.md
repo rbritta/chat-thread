@@ -4,6 +4,18 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-11-23
+
+### Added
+
+- Tables in markdown, as GitHub writes them: alignment, `\|` for a pipe, `<br>` for a line break inside a cell. `||` makes the cell on its left span one more column, and a row whose first cell is empty is the foot of the row above (same `data-key`, no line between them). Rows carry `data-key` and cells `data-col`, so an app can style or find them.
+- Buttons inside a message from the other side: `[label](reply:text "hint")` sends `text` as an ordinary message, `[label](fill:text "hint")` puts it in the box and marks its table row. The hint is the button's name; `✓` and `✎` become a check and a pencil. A row with a `reply:` waits for an answer (tinted, its pencil yellow); a decided row's pencil is green; a foot's buttons are dashed pills as wide as their words. In my own messages, in a log or a preview they are marks, not buttons.
+- `pinned: true` on a message draws it above the box instead of in the list ("Pinned"), rewritten in place by `updateMessage`. Its first text is kept in `original`, by the thread and by every store, and the bar offers "See the original" and "See the markdown". `resolved` (an option, `setResolved()`, and `createThreads` for a resolved thread) makes it "Final" and its buttons marks.
+- On a phone a table of three or more columns becomes cards.
+- `renderPinned`, `pinnedOf`, `reviseMessage` and `keepOriginal` in the core. New strings: `pinned`, `final`, `pinnedHint`, `finalHint`, `showOriginal`, `showSource`, `showCurrent`. New colors: `--ct-ok`, `--ct-warn`, `--ct-said`, `--ct-row-wait`, `--ct-row-edit`, `--ct-cell` and the pinned bar's.
+- The SQLite store keeps `pinned` and `original` (a table from an older version gets the columns when it opens), and keeps the first text of a pinned message when `update` changes it. The browser cannot pin.
+- The live demo has a pinned review table: Decisions in a table.
+
 ## [0.9.0] - 2026-11-17
 
 ### Added
@@ -163,7 +175,8 @@ First release, extracted from six apps that each drew their own conversation: tw
 - `memoryStore`, `localStore`, `restStore`, the SQLite store and the HTTP handler for Node.
 - `dist/` builds for a script tag (`window.ChatThread`) and for import (`chat-thread.mjs`). CSP-safe markup.
 
-[Unreleased]: https://github.com/rbritta/chat-thread/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/rbritta/chat-thread/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/rbritta/chat-thread/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/rbritta/chat-thread/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/rbritta/chat-thread/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/rbritta/chat-thread/compare/v0.6.0...v0.7.0

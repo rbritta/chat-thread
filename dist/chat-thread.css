@@ -37,6 +37,22 @@
   --ct-max-width: min(86%, 680px);
   --ct-clamp: 7.4em;
   --ct-note-meta: inline-flex;
+  /* tables, the buttons inside a message and the pinned message */
+  --ct-ok: #3fb950;
+  --ct-ok-tint: rgba(63, 185, 80, .08);
+  --ct-ok-edge: rgba(63, 185, 80, .44);
+  --ct-warn: #e3b341;
+  --ct-warn-tint: rgba(227, 179, 65, .08);
+  --ct-warn-edge: rgba(227, 179, 65, .44);
+  --ct-row-wait: rgba(227, 179, 65, .05);
+  --ct-row-edit: rgba(88, 166, 255, .09);
+  --ct-said: #67d4e0;
+  --ct-cell: var(--ct-muted);
+  --ct-cell-strong: var(--ct-text);
+  --ct-line: var(--ct-theirs-border);
+  --ct-pinned: var(--ct-field);
+  --ct-pinned-head: var(--ct-day);
+  --ct-pinned-border: var(--ct-field-border);
 
   display: flex;
   flex-direction: column;
@@ -393,6 +409,161 @@
 .ct-toggles label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
 .ct button:focus-visible, .ct-toggles input:focus-visible { outline: 2px solid var(--ct-focus); outline-offset: 2px; }
 
+/* tables (GFM): the body of a message as a table, and on a phone as cards */
+.ct-table { margin: 4px 0 6px; overflow-x: auto; }
+.ct-table table { width: 100%; border-collapse: collapse; }
+.ct-table th {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--ct-line);
+  color: var(--ct-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-align: left;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.ct-table td {
+  padding: 14px 8px;
+  border-top: 1px solid var(--ct-line);
+  color: var(--ct-cell);
+  line-height: 1.5;
+  vertical-align: top;
+  overflow-wrap: break-word;
+}
+.ct-table th[align="right"], .ct-table td[align="right"] { text-align: right; }
+.ct-table th[align="center"], .ct-table td[align="center"] { text-align: center; }
+.ct-table tbody tr:first-child td { border-top: 0; }
+/* plain text is the quiet part of a cell, bold the value, italics what someone said */
+.ct-table td strong { color: var(--ct-cell-strong); font-weight: 500; }
+.ct-table td:first-child strong { font-weight: 600; }
+.ct-table td em { color: var(--ct-said); }
+.ct-table del, .ct-pinned-body del { color: var(--ct-muted); text-decoration-color: var(--ct-alert); }
+/* a row waiting for an answer, the row being answered in the box, and the rows that continue a row */
+.ct-table tr.ct-tr--waiting td { background: var(--ct-row-wait); }
+.ct-table tr.ct-tr--editing td { background: var(--ct-row-edit); }
+.ct-table tr.ct-tr--editing td:first-child { box-shadow: inset 3px 0 var(--ct-link); }
+.ct-table tr.ct-tr--foot td { padding-top: 0; padding-bottom: 14px; border-top: 0; }
+.ct-table tr.ct-tr--continued td { padding-bottom: 10px; }
+.ct-table td.ct-td--actions { width: 1%; white-space: nowrap; }
+
+/* buttons inside a message: [label](reply:text) sends, [label](fill:text) writes in the box */
+.ct-reply { margin: 0 4px 4px 0; padding: 3px 10px; font-size: 12.5px; line-height: 1.4; opacity: 1; vertical-align: middle; }
+.ct-reply[data-fill] { border-style: dashed; color: var(--ct-muted); }
+button.ct-reply:hover { border-color: var(--ct-muted); }
+.ct-reply--off { cursor: default; }
+/* a one-symbol label is a round icon: ✓ (sends) green; ✎ (writes) yellow while its row waits, green once it is decided */
+.ct-chip--icon {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 14px;
+  line-height: 1;
+}
+.ct-chip--icon svg { width: 14px; height: 14px; fill: currentColor; }
+.ct-chip--icon.ct-reply,
+.ct-table tr:not(.ct-tr--waiting) .ct-chip--icon.ct-reply[data-fill],
+.ct-body :is(p, li) > .ct-chip--icon.ct-reply[data-fill] { border: 1px solid var(--ct-ok-edge); background: var(--ct-ok-tint); color: var(--ct-ok); }
+.ct-chip--icon.ct-reply[data-fill] { border: 1px solid var(--ct-warn-edge); background: var(--ct-warn-tint); color: var(--ct-warn); }
+button.ct-chip--icon.ct-reply:hover { border-color: currentColor; }
+/* the row's foot: the other side's suggestions, dashed pills as wide as their words */
+.ct-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.ct-actions .ct-reply { margin: 0; padding: 4px 12px; border-style: dashed; border-color: var(--ct-muted); font-size: 13px; }
+.ct-actions button.ct-reply:hover { border-style: solid; }
+.ct-reply-pending { display: inline-flex; align-items: center; gap: 5px; color: var(--ct-muted); font-size: 12.5px; }
+.ct-reply-pending svg { width: 14px; height: 14px; flex: none; }
+
+/* the pinned message, above the box: rewritten in place; "See the original" and "See the markdown" */
+.ct-pinned {
+  margin-top: 10px;
+  overflow: hidden;
+  border: 1px solid var(--ct-pinned-border);
+  border-radius: 12px;
+  background: var(--ct-pinned);
+  font-size: 13px;
+}
+.ct-pinned-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--ct-pinned-border);
+  background: var(--ct-pinned-head);
+  color: var(--ct-muted);
+  font-size: 12px;
+}
+.ct-pinned-label { flex: none; font-size: 10.5px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; white-space: nowrap; }
+.ct-pinned-hint { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ct-pinned-view {
+  flex: none;
+  padding: 1px 9px;
+  border: 1px solid var(--ct-pinned-border);
+  border-radius: 6px;
+  background: none;
+  color: var(--ct-muted);
+  font: inherit;
+  font-size: 11.5px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ct-pinned-hint + .ct-pinned-view { margin-left: auto; }
+.ct-pinned-view[aria-pressed="true"] { border-color: var(--ct-link); color: var(--ct-text); }
+.ct-pinned-body { padding: 10px 12px 12px; }
+.ct-pinned-body p { margin: 0 0 8px; }
+.ct-pinned-body .ct-table { margin: 0; }
+/* the lines after a table are its notes */
+.ct-pinned-body .ct-table ~ p { margin-top: 10px; color: var(--ct-muted); font-size: 12.5px; line-height: 2; }
+.ct-pinned-source {
+  margin: 0;
+  max-height: 340px;
+  padding: 10px 12px;
+  overflow: auto;
+  background: var(--ct-pre);
+  font: 12px/1.5 var(--ct-mono);
+  white-space: pre;
+  overflow-wrap: normal;
+}
+.ct-pinned-body[hidden], .ct-pinned-source[hidden] { display: none; }
+
+/* a phone: a table of three or more columns becomes cards. The first two cells share the card's
+   first line ("4 · 15:44"), the third is its body, and from the fourth on each cell has its
+   column's name above it, except the cells that only hold buttons. */
+@media (max-width: 700px) {
+  .ct-pinned-hint { display: none; }
+  .ct-table--cards thead { display: none; }
+  .ct-table--cards table, .ct-table--cards tbody, .ct-table--cards tr, .ct-table--cards td { display: block; }
+  .ct-table--cards tbody tr { padding: 14px 4px 12px; border-top: 1px solid var(--ct-line); }
+  .ct-table--cards tbody tr:first-child { border-top: 0; }
+  .ct-table--cards tbody tr.ct-tr--foot { padding-top: 0; padding-bottom: 14px; border-top: 0; }
+  .ct-table--cards tbody tr.ct-tr--continued { padding-bottom: 8px; }
+  .ct-table--cards tr.ct-tr--foot td:empty { display: none; }
+  .ct-table--cards tr.ct-tr--waiting { background: var(--ct-row-wait); }
+  .ct-table--cards tr.ct-tr--editing { background: var(--ct-row-edit); box-shadow: inset 3px 0 var(--ct-link); }
+  .ct-table--cards tbody td,
+  .ct-table--cards tr.ct-tr--waiting td,
+  .ct-table--cards tr.ct-tr--editing td,
+  .ct-table--cards tr.ct-tr--editing td:first-child,
+  .ct-table--cards tr.ct-tr--foot td,
+  .ct-table--cards tr.ct-tr--continued td { padding: 2px 4px; border: 0; background: none; box-shadow: none; text-align: left; }
+  .ct-table--cards td:nth-child(1), .ct-table--cards td:nth-child(2) { display: inline-block; color: var(--ct-muted); font-weight: 600; }
+  .ct-table--cards td:nth-child(1)::after { content: " ·"; }
+  .ct-table--cards td:nth-child(n+3)::before {
+    content: attr(data-col);
+    display: block;
+    margin-top: 4px;
+    color: var(--ct-muted);
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+  }
+  .ct-table--cards td:nth-child(3)::before, .ct-table--cards td.ct-td--actions::before, .ct-table--cards td[data-col=""]::before { display: none; }
+  .ct-table--cards td.ct-td--actions { width: auto; white-space: normal; }
+}
+
 /* the light WhatsApp look: for previews of what the other phone will show. Its muted text,
    links and focus are a shade darker than WhatsApp's own, to pass WCAG AA on the bubbles and on
    the WhatsApp wallpaper (#efeae2); the blue of the read ticks is WhatsApp's (the state is also
@@ -417,6 +588,15 @@
   --ct-chip: #ffffff;
   --ct-code: rgba(11, 20, 26, .06);
   --ct-pre: rgba(11, 20, 26, .05);
+  --ct-ok: #1a7f37;
+  --ct-ok-tint: rgba(26, 127, 55, .07);
+  --ct-ok-edge: rgba(26, 127, 55, .4);
+  --ct-warn: #8a5c00;
+  --ct-warn-tint: rgba(154, 103, 0, .08);
+  --ct-warn-edge: rgba(154, 103, 0, .4);
+  --ct-row-wait: rgba(212, 167, 44, .1);
+  --ct-row-edit: rgba(9, 105, 218, .07);
+  --ct-said: #0b7285;
   --ct-font-size: 14.2px;
   color-scheme: light;
 }
@@ -467,6 +647,15 @@
   --ct-chip: #ffffff;
   --ct-code: rgba(31, 35, 40, .08);
   --ct-pre: rgba(31, 35, 40, .05);
+  --ct-ok: #1a7f37;
+  --ct-ok-tint: rgba(26, 127, 55, .07);
+  --ct-ok-edge: rgba(26, 127, 55, .4);
+  --ct-warn: #8a5c00;
+  --ct-warn-tint: rgba(154, 103, 0, .08);
+  --ct-warn-edge: rgba(154, 103, 0, .4);
+  --ct-row-wait: rgba(212, 167, 44, .1);
+  --ct-row-edit: rgba(9, 105, 218, .07);
+  --ct-said: #0b7285;
   color-scheme: light;
 }
 
@@ -502,6 +691,15 @@
     --ct-chip: #ffffff;
     --ct-code: rgba(31, 35, 40, .08);
     --ct-pre: rgba(31, 35, 40, .05);
+    --ct-ok: #1a7f37;
+    --ct-ok-tint: rgba(26, 127, 55, .07);
+    --ct-ok-edge: rgba(26, 127, 55, .4);
+    --ct-warn: #8a5c00;
+    --ct-warn-tint: rgba(154, 103, 0, .08);
+    --ct-warn-edge: rgba(154, 103, 0, .4);
+    --ct-row-wait: rgba(212, 167, 44, .1);
+    --ct-row-edit: rgba(9, 105, 218, .07);
+    --ct-said: #0b7285;
     color-scheme: light;
   }
 }
