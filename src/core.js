@@ -45,6 +45,8 @@ export const DEFAULT_STRINGS = Object.freeze({
   caption: 'Caption',
   close: 'Close',
   photo: 'Photo',
+  image: 'Image',
+  chooseAnother: 'Choose another',
   enlarge: 'Enlarge photo',
   pinned: 'Pinned',
   final: 'Final',
@@ -55,8 +57,12 @@ export const DEFAULT_STRINGS = Object.freeze({
   showCurrent: 'See the current one',
 });
 
-/** What the + left of the box can offer. Only `camera` for now: take a photo and send it with a caption. */
-export const ATTACH = Object.freeze(['camera']);
+/**
+ * What the + left of the box can offer: `camera` takes a photo, `image` picks a picture from the
+ * files (a phone's gallery). Either one also lets a picture pasted into the box in. Each goes to
+ * the same preview, with a caption, and is sent as a photo.
+ */
+export const ATTACH = Object.freeze(['camera', 'image']);
 
 export const DEFAULTS = Object.freeze({
   mode: 'chat',
@@ -671,7 +677,10 @@ const TICK_PATH = 'M2 13l4 4 8-9M10 16l1 1 9-10';
 const icon = (cls, label, inner) => `<svg class="ct-tick${cls}" viewBox="0 0 24 24" role="img" aria-label="${escapeHtml(label)}">${inner}</svg>`;
 const PLUS_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
 const CAMERA_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4l-1.8 2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-3.2L15 4H9zm3 4.5a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9zm0 2a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"/></svg>';
-const ATTACH_ICONS = { camera: CAMERA_ICON };
+const IMAGE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm0 2v10.6l3.8-3.8a1 1 0 0 1 1.4 0L13 14.6l1.8-1.8a1 1 0 0 1 1.4 0L19 15.6V5H5zm10.5 1.5a2 2 0 1 1 0 4 2 2 0 0 1 0-4z"/></svg>';
+const ATTACH_ICONS = { camera: CAMERA_ICON, image: IMAGE_ICON };
+/** The pictures `image` and a paste take: never SVG (it can carry script) and nothing a canvas cannot draw. */
+export const PICTURE_TYPES = Object.freeze(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp']);
 const SEND_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20.5l18-8.5L3 3.5v6.6l12 1.9-12 1.9z"/></svg>';
 
 /** Ticks of my message: clock while pending or queued, one tick sent, two delivered, two in color read, a red mark when it failed. */
@@ -840,10 +849,13 @@ export function renderComposer(options) {
   const toggles = o.toggles.length
     ? `<div class="ct-toggles">${o.toggles.map((t) => `<label><input type="checkbox" name="${escapeHtml(t.name)}"${t.checked ? ' checked' : ''}> ${escapeHtml(t.label)}</label>`).join('')}</div>`
     : '';
-  // the + and its menu; the file input is a phone's own camera (and the way in with no camera API)
+  // the + and its menu; the camera's file input is a phone's own camera (and the way in with no
+  // camera API), the image's is the file picker (a phone's gallery)
   const attach = o.attach.length
     ? `<button type="button" class="ct-attach" aria-haspopup="menu" aria-expanded="false" aria-label="${escapeHtml(s.attach)}" title="${escapeHtml(s.attach)}">${PLUS_ICON}</button><div class="ct-menu" role="menu" hidden>${o.attach
-      .map((a) => `<button type="button" class="ct-menu-item" role="menuitem" data-attach="${a}"><span class="ct-menu-icon ct-menu-icon--${a}">${ATTACH_ICONS[a]}</span>${escapeHtml(s[a])}</button>`).join('')}</div><input type="file" class="ct-file" accept="image/*" capture="environment" tabindex="-1" aria-hidden="true" hidden>`
+      .map((a) => `<button type="button" class="ct-menu-item" role="menuitem" data-attach="${a}"><span class="ct-menu-icon ct-menu-icon--${a}">${ATTACH_ICONS[a]}</span>${escapeHtml(s[a])}</button>`).join('')}</div>${o.attach.includes('camera')
+      ? '<input type="file" class="ct-file" accept="image/*" capture="environment" tabindex="-1" aria-hidden="true" hidden>' : ''}${o.attach.includes('image')
+      ? `<input type="file" class="ct-pick" accept="${PICTURE_TYPES.join(',')}" tabindex="-1" aria-hidden="true" hidden>` : ''}`
     : '';
   // enterkeyhint: a phone's keyboard labels its Enter key "send" when Enter sends
   return `<div class="ct-composer">${chips}<div class="ct-row">${attach}<div class="ct-field"><textarea class="ct-input" rows="1" maxlength="${LIMITS.text}" enterkeyhint="${o.enterSends ? 'send' : 'enter'}" placeholder="${escapeHtml(s.placeholder)}" aria-label="${escapeHtml(s.placeholder)}"></textarea></div><button type="button" class="ct-send" disabled aria-label="${escapeHtml(s.send)}" title="${escapeHtml(s.send)}">${SEND_ICON}</button></div>${toggles}</div>`;

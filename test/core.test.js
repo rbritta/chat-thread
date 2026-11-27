@@ -5,7 +5,7 @@ import vm from 'node:vm';
 import {
   DEFAULT_STRINGS, authorTone, dayKey, dayLabel, escapeHtml, formatTime, isLong, linkify, normalizeChips, normalizeMessage,
   normalizeAttach, normalizeToggles, renderComposer, renderList, renderMarkdown, renderMessage, renderPinned, renderPlain, renderThread, renderTyping, renderWhatsApp,
-  keepOriginal, pinnedOf, resolveOptions, reviseMessage, safeUrl,
+  keepOriginal, pinnedOf, resolveOptions, reviseMessage, safeUrl, PICTURE_TYPES,
 } from '../src/core.js';
 
 const UTC = { timeZone: 'UTC', locale: 'en-US' };
@@ -367,6 +367,20 @@ test('the + left of the box: only known items, once, and nothing without them', 
   assert.match(box, /<div class="ct-menu" role="menu" hidden><button type="button" class="ct-menu-item" role="menuitem" data-attach="camera">.*Câmera<\/button><\/div>/);
   assert.match(box, /<input type="file" class="ct-file" accept="image\/\*" capture="environment" tabindex="-1" aria-hidden="true" hidden><div class="ct-field">/);
   assert.match(renderThread([], { attach: ['camera'] }), /data-options="[^"]*attach/);
+});
+
+test('the + can also pick an image from the files: its own menu item and file input, no camera input without the camera', () => {
+  assert.deepEqual(normalizeAttach(['image', 'camera', 'image', 'gallery']), ['image', 'camera']);
+  const both = renderComposer({ attach: ['camera', 'image'], strings: { image: 'Imagem' } });
+  assert.match(both, /data-attach="camera">.*Camera<\/button><button type="button" class="ct-menu-item" role="menuitem" data-attach="image"><span class="ct-menu-icon ct-menu-icon--image"><svg[^>]*>.*<\/svg><\/span>Imagem<\/button><\/div>/);
+  assert.match(both, /<input type="file" class="ct-file" accept="image\/\*" capture="environment" tabindex="-1" aria-hidden="true" hidden><input type="file" class="ct-pick" accept="image\/png,image\/jpeg,image\/gif,image\/webp,image\/bmp" tabindex="-1" aria-hidden="true" hidden><div class="ct-field">/);
+  const image = renderComposer({ attach: ['image'] });
+  assert.match(image, /data-attach="image">.*Image<\/button>/);
+  assert.doesNotMatch(image, /ct-file|capture=/, 'no camera input without the camera');
+  assert.doesNotMatch(image, /svg\+xml/, 'never SVG');
+  assert.deepEqual([...PICTURE_TYPES], ['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp']);
+  assert.equal(DEFAULT_STRINGS.image, 'Image');
+  assert.equal(DEFAULT_STRINGS.chooseAnother, 'Choose another');
 });
 
 test('a photo in the bubble: a button with the picture before the text; only safe URLs', () => {

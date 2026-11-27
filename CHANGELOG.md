@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format is based on 
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-11-26
+
+### Added
+
+- `attach: ['image']`: the + menu's Image picks a picture from the files (a phone's gallery), a PNG, JPEG, GIF, WebP or BMP and never SVG. It opens the same preview as a photo, with a caption and Choose another, and reaches `onSend(text, { photo, caption })` as a JPEG `Blob` of at most 2048 px. `chat.pickImage()` opens the picker from code. New strings: `image`, `chooseAnother`; new color `--ct-image`; `PICTURE_TYPES` in the core.
+- With any `attach`, a picture pasted into the box (a screenshot, Ctrl+V) opens the same preview, with nothing to take again. A paste that also brings text stays text: cells copied from a spreadsheet carry a picture of themselves.
+
+### Changed
+
+- The text already in the box becomes the photo's caption and leaves the box when the photo is sent; closing the preview leaves it in the box. This holds for the camera too.
+- A picture with transparency is drawn on white before it becomes a JPEG, instead of on black.
+- The camera's file input is drawn only when `attach` has `camera`.
+
 ## [0.10.0] - 2026-11-23
 
 ### Added

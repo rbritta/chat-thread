@@ -18,7 +18,7 @@
  * script only hydrates it (`hydrate: true`), with the options the server wrote into it.
  */
 import {
-  dayKey, escapeHtml, keepOriginal, normalizeMessage, pinnedOf, renderDay, renderList, renderMessage, renderPinned,
+  PICTURE_TYPES, dayKey, escapeHtml, keepOriginal, normalizeMessage, pinnedOf, renderDay, renderList, renderMessage, renderPinned,
   renderThread, renderTyping, renderWaiting, resolveOptions, reviseMessage,
 } from './core.js';
 
@@ -38,6 +38,16 @@ function fragment(html) {
   const tpl = document.createElement('template');
   tpl.innerHTML = html;
   return tpl.content;
+}
+
+/**
+ * The picture a paste brings (a screenshot, a copied image), or null. A paste that also brings
+ * text stays text: cells copied from a spreadsheet come with a picture of themselves.
+ */
+function pastedPicture(data) {
+  if (!data || String(data.getData?.('text/plain') ?? '').trim()) return null;
+  const items = [...(data.items ?? [])].filter((item) => item.kind === 'file').map((item) => item.getAsFile()).filter(Boolean);
+  return (items.length ? items : [...(data.files ?? [])]).find((file) => PICTURE_TYPES.includes(file.type)) ?? null;
 }
 
 // Motion is short and eased out (quick, then settling softly, so nothing snaps into place at
@@ -152,7 +162,7 @@ export function createChat(el, options = {}) {
 
   const listeners = [
     ['click', onClick], ['keydown', onKeydown], ['input', onInput], ['mousedown', onMouseDown],
-    ['compositionstart', onComposition], ['compositionend', onComposition], ['change', onChange],
+    ['compositionstart', onComposition], ['compositionend', onComposition], ['change', onChange], ['paste', onPaste],
   ];
 
   function mount(hydrate) {
@@ -247,11 +257,18 @@ export function createChat(el, options = {}) {
     return { open, close };
   })();
 
+  /*
+   * The photo's preview, whichever way the picture came: the live camera (`live`), a phone's own
+   * camera app (`phone`), the file picker of the + menu's Image (`image`) or a paste in the box
+   * (`paste`). The text already in the box moves into the caption, and leaves the box when the
+   * photo is sent.
+   */
   const camera = (() => {
     let layer = null;
     let stream = null;
     let shot = null;   // the canvas with the photo taken
-    let viaFile = false;
+    let origin = 'live';
+    let moved = false; // the caption came from the box
     const MAX_SIDE = 2048;
 
     const stop = () => {
@@ -275,28 +292,41 @@ export function createChat(el, options = {}) {
     }
 
     function show(phase) {
+      const s = opts.strings;
       const live = phase === 'live';
       q('.ct-cam-video').hidden = !live;
       q('.ct-cam-shot').hidden = live;
       q('.ct-cam-foot--live').hidden = !live;
       q('.ct-cam-foot--shot').hidden = live;
-      q('.ct-cam-title').textContent = live ? opts.strings.takePhoto : opts.strings.photo;
+      q('.ct-cam-title').textContent = live ? s.takePhoto : s.photo;
+      layer.setAttribute('aria-label', origin === 'live' || origin === 'phone' ? s.camera : s.photo);
+      // a pasted picture has nothing to take again; a picked one is chosen again
+      const retake = q('.ct-cam-retake');
+      retake.hidden = origin === 'paste';
+      retake.textContent = origin === 'image' ? s.chooseAnother : s.retake;
+      if (!live && !moved && input?.value.trim() && !q('.ct-cam-caption').value) {
+        q('.ct-cam-caption').value = input.value.trim();
+        moved = true;
+      }
       (live ? q('.ct-cam-take') : q('.ct-cam-caption'))?.focus();
     }
 
-    /** The picture, at most MAX_SIDE on its long side, on the preview canvas. */
+    /** The picture, at most MAX_SIDE on its long side, on the preview canvas (on white: a JPEG has no transparency). */
     function keep(source, width, height) {
       const scale = Math.min(1, MAX_SIDE / Math.max(width, height));
       const c = q('.ct-cam-shot');
-      c.width = Math.round(width * scale);
-      c.height = Math.round(height * scale);
-      c.getContext('2d').drawImage(source, 0, 0, c.width, c.height);
+      c.width = Math.max(1, Math.round(width * scale));
+      c.height = Math.max(1, Math.round(height * scale));
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, c.width, c.height);
+      ctx.drawImage(source, 0, 0, c.width, c.height);
       shot = c;
       show('shot');
     }
 
     async function live() {
-      viaFile = false;
+      origin = 'live';
       if (!layer) build();
       show('live');
       try {
@@ -306,20 +336,23 @@ export function createChat(el, options = {}) {
       } catch (err) {
         // no camera, or the permission refused: the file input still lets a photo in
         close();
-        pick();
+        pick('phone');
       }
     }
 
-    function pick() {
-      viaFile = true;
-      const file = root.querySelector('.ct-file');
+    /** A file input: `.ct-file` is a phone's own camera, `.ct-pick` the file picker (a phone's gallery). */
+    function pick(which = 'phone') {
+      origin = which;
+      const file = root.querySelector(which === 'image' ? '.ct-pick' : '.ct-file');
       if (!file) return;
       file.value = '';
       file.click();
     }
 
-    async function fromFile(file) {
-      if (!file || !/^image\//.test(file.type)) return;
+    /** A picture from a file input or a paste. The camera's own takes any image; the others only PICTURE_TYPES. */
+    async function fromFile(file, from = origin) {
+      if (!file || !(from === 'phone' ? /^image\//.test(file.type) : PICTURE_TYPES.includes(file.type))) return;
+      origin = from;
       try {
         const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
         if (!layer) build();
@@ -356,7 +389,13 @@ export function createChat(el, options = {}) {
       const caption = q('.ct-cam-caption').value.trim();
       const photo = await new Promise((resolve) => shot.toBlob(resolve, 'image/jpeg', 0.85));
       const preview = thumbnail(shot);
+      // the box's text went as the caption: it leaves the box with the photo
+      const fromBox = moved;
       close();
+      if (photo && fromBox && input) {
+        input.value = '';
+        grow();
+      }
       if (photo) send(caption, { photo, preview });
       input?.focus();
     }
@@ -364,6 +403,7 @@ export function createChat(el, options = {}) {
     function close() {
       stop();
       shot = null;
+      moved = false;
       if (!layer) return;
       layer.remove();
       layer = null;
@@ -377,8 +417,8 @@ export function createChat(el, options = {}) {
         attachButton()?.focus();
       } else if (b.classList.contains('ct-cam-take')) take();
       else if (b.classList.contains('ct-cam-retake')) {
-        if (viaFile) pick();
-        else live();
+        if (origin === 'live') live();
+        else if (origin !== 'paste') pick(origin);
       } else if (b.classList.contains('ct-cam-send')) deliver();
     }
 
@@ -397,9 +437,11 @@ export function createChat(el, options = {}) {
       /** A phone (coarse pointer) or a browser with no camera API opens the phone's camera app. */
       open() {
         const coarse = globalThis.matchMedia?.('(pointer: coarse)').matches;
-        if (coarse || !navigator.mediaDevices?.getUserMedia) pick();
+        if (coarse || !navigator.mediaDevices?.getUserMedia) pick('phone');
         else live();
       },
+      /** The + menu's Image: the file picker, then the same preview. */
+      pickImage: () => pick('image'),
       fromFile,
       close,
     };
@@ -852,6 +894,7 @@ export function createChat(el, options = {}) {
     } else if (is('ct-menu-item')) {
       closeMenu();
       if (button.dataset.attach === 'camera') camera.open();
+      else if (button.dataset.attach === 'image') camera.pickImage();
     } else if (is('ct-send')) {
       send();
       // pressed from the keyboard, the button is now disabled: the focus goes back to the box
@@ -951,8 +994,17 @@ export function createChat(el, options = {}) {
   }
 
   function onChange(ev) {
-    if (!ev.target.classList?.contains('ct-file')) return;
-    camera.fromFile(ev.target.files?.[0]);
+    if (ev.target.classList?.contains('ct-file')) camera.fromFile(ev.target.files?.[0], 'phone');
+    else if (ev.target.classList?.contains('ct-pick')) camera.fromFile(ev.target.files?.[0], 'image');
+  }
+
+  /** An image pasted into the box opens the photo's preview, when the + offers anything (`attach`). */
+  function onPaste(ev) {
+    if (ev.target !== input || !opts.attach.length || opts.mode !== 'chat') return;
+    const picture = pastedPicture(ev.clipboardData);
+    if (!picture) return;
+    ev.preventDefault();
+    camera.fromFile(picture, 'paste');
   }
 
   function onInput(ev) {
@@ -1029,6 +1081,8 @@ export function createChat(el, options = {}) {
     send: (value, extra) => send(value, extra),
     /** Opens the camera, as the + menu's Camera does (only with `attach: ['camera']`). */
     openCamera() { if (root?.querySelector('.ct-file')) camera.open(); },
+    /** Opens the file picker, as the + menu's Image does (only with `attach: ['image']`). */
+    pickImage() { if (root?.querySelector('.ct-pick')) camera.pickImage(); },
     /** New options. The text being typed, the toggles' boxes and the focus in the box are kept. */
     configure(next = {}) {
       const draft = input?.value ?? '';

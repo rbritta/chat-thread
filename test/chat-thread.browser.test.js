@@ -1029,6 +1029,123 @@ test('the + opens a menu; Camera takes a photo (here from the file input), the p
   await ctx.close();
 });
 
+test('the + menu\'s Image picks a file; the box\'s text becomes the caption and leaves the box when the photo goes', async (t) => {
+  if (!browser) return t.skip(skip);
+  const { p, ctx, errors } = await page(1200, 900);
+  await installSandbox(p);
+  await p.evaluate(async () => {
+    window.sent = [];
+    const { chat } = await window.sandbox({ attach: ['camera', 'image'], onSend: async (text, info) => { window.sent.push({ text, caption: info.caption, type: info.photo?.type, size: info.photo?.size }); return { state: 'sent' }; } });
+    window.box = chat;
+  });
+  const sb = p.locator('.sandbox');
+  await sb.locator('.ct-input').fill('the broken header');
+  await sb.locator('.ct-attach').click();
+  assert.deepEqual(await sb.locator('.ct-menu-item').allTextContents(), ['Camera', 'Image']);
+  const chooser = p.waitForEvent('filechooser');
+  await sb.locator('.ct-menu-item[data-attach="image"]').click();
+  const picker = await chooser;
+  assert.equal(await picker.element().evaluate((i) => i.className), 'ct-pick', 'the file picker, not the camera');
+  // a transparent 40x30 PNG: it lands on white, since a JPEG has no transparency
+  const png = Buffer.from(await p.evaluate(() => { const c = document.createElement('canvas'); c.width = 40; c.height = 30; return c.toDataURL('image/png').split(',')[1]; }), 'base64');
+  await picker.setFiles({ name: 'screen.png', mimeType: 'image/png', buffer: png });
+  await p.waitForSelector('.ct-cam .ct-cam-shot:not([hidden])');
+  assert.equal(await p.locator('.ct-cam').getAttribute('aria-label'), 'Photo');
+  assert.equal(await p.locator('.ct-cam-retake').textContent(), 'Choose another');
+  assert.equal(await p.locator('.ct-cam-caption').inputValue(), 'the broken header', 'the box\'s text is the caption');
+  assert.equal(await p.evaluate(() => document.activeElement?.classList.contains('ct-cam-caption')), true);
+  const again = p.waitForEvent('filechooser');
+  await p.locator('.ct-cam-retake').click();
+  await (await again).setFiles({ name: 'screen.png', mimeType: 'image/png', buffer: png });
+  // the picture chosen again is drawn, and the caption has the focus back
+  await p.waitForFunction(() => document.activeElement?.classList.contains('ct-cam-caption'));
+  assert.equal(await p.locator('.ct-cam-caption').inputValue(), 'the broken header', 'choosing again keeps the caption');
+  await p.keyboard.press('Enter');
+  await p.waitForFunction(() => window.sent.length === 1);
+  const sent = await p.evaluate(() => window.sent[0]);
+  assert.deepEqual([sent.text, sent.caption, sent.type], ['📷 the broken header', 'the broken header', 'image/jpeg']);
+  assert.ok(sent.size > 0);
+  assert.equal(await sb.locator('.ct-input').inputValue(), '', 'the text left the box with the photo');
+  const thumb = sb.locator('.ct-msg--mine').last().locator('.ct-img img');
+  assert.match(await thumb.getAttribute('src'), /^data:image\/jpeg;base64,/);
+  const pixel = await thumb.evaluate(async (img) => {
+    await img.decode();
+    const c = document.createElement('canvas');
+    c.width = img.naturalWidth;
+    c.height = img.naturalHeight;
+    const ctx = c.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    return [...ctx.getImageData(5, 5, 1, 1).data];
+  });
+  assert.ok(pixel.every((v) => v >= 245), `white, not black (${pixel})`);
+  // chat.pickImage() opens the same picker; closing the preview keeps the box as it was
+  await sb.locator('.ct-input').fill('still here');
+  await p.evaluate(() => {
+    const b = document.createElement('button');
+    b.id = 'pick';
+    b.textContent = 'Pick';
+    b.addEventListener('click', () => window.box.pickImage());
+    document.querySelector('main').prepend(b);
+  });
+  const third = p.waitForEvent('filechooser');
+  await p.click('#pick');
+  await (await third).setFiles({ name: 'screen.png', mimeType: 'image/png', buffer: png });
+  await p.waitForSelector('.ct-cam .ct-cam-shot:not([hidden])');
+  await p.keyboard.press('Escape');
+  assert.equal(await p.locator('.ct-cam').count(), 0);
+  assert.equal(await sb.locator('.ct-input').inputValue(), 'still here');
+  assert.equal(await p.evaluate(() => window.sent.length), 1);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
+test('an image pasted into the box opens the preview; a paste with text stays text; SVG and a box without + are left alone', async (t) => {
+  if (!browser) return t.skip(skip);
+  const { p, ctx, errors } = await page(1200, 900);
+  await installSandbox(p);
+  await p.evaluate(async () => {
+    window.sent = [];
+    const { chat } = await window.sandbox({ attach: ['camera'], onSend: async (text, info) => { window.sent.push({ text, caption: info.caption, type: info.photo?.type }); return { state: 'sent' }; } });
+    window.box = chat;
+    // a paste the way a browser makes one: a screenshot (3000 x 1500), with or without text
+    window.paste = async (into, { text = '', type = 'image/png' } = {}) => {
+      const c = document.createElement('canvas');
+      c.width = 3000;
+      c.height = 1500;
+      c.getContext('2d').fillRect(0, 0, 3000, 1500);
+      const blob = type === 'image/png' ? await new Promise((r) => c.toBlob(r, type)) : new Blob(['<svg xmlns="http://www.w3.org/2000/svg"/>'], { type });
+      const data = new DataTransfer();
+      if (text) data.setData('text/plain', text);
+      data.items.add(new File([blob], 'shot', { type }));
+      return !into.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+    };
+  });
+  const sb = p.locator('.sandbox');
+  // text with the picture (cells from a spreadsheet): the browser pastes the text
+  assert.equal(await p.evaluate(() => window.paste(document.querySelector('.sandbox .ct-input'), { text: 'A1\tB1' })), false);
+  assert.equal(await p.locator('.ct-cam').count(), 0);
+  // SVG is never a picture
+  assert.equal(await p.evaluate(() => window.paste(document.querySelector('.sandbox .ct-input'), { type: 'image/svg+xml' })), false);
+  assert.equal(await p.locator('.ct-cam').count(), 0);
+  // a screenshot: the preview, at most 2048 px, nothing to take again
+  await sb.locator('.ct-input').fill('look');
+  assert.equal(await p.evaluate(() => window.paste(document.querySelector('.sandbox .ct-input'))), true);
+  await p.waitForSelector('.ct-cam .ct-cam-shot:not([hidden])');
+  assert.deepEqual(await p.locator('.ct-cam-shot').evaluate((c) => [c.width, c.height]), [2048, 1024]);
+  assert.equal(await p.locator('.ct-cam-retake').isHidden(), true);
+  assert.equal(await p.locator('.ct-cam-caption').inputValue(), 'look');
+  await p.locator('.ct-cam-send').click();
+  await p.waitForFunction(() => window.sent.length === 1);
+  assert.deepEqual(await p.evaluate(() => window.sent[0]), { text: '📷 look', caption: 'look', type: 'image/jpeg' });
+  assert.equal(await sb.locator('.ct-input').inputValue(), '');
+  // a thread whose + offers nothing does not take pictures
+  await p.evaluate(async () => { const { el } = await window.sandbox({}); el.classList.add('plain'); });
+  assert.equal(await p.evaluate(() => window.paste(document.querySelector('.plain .ct-input'))), false);
+  assert.equal(await p.locator('.ct-cam').count(), 0);
+  assert.deepEqual(errors, []);
+  await ctx.close();
+});
+
 test('a photo in a bubble: a thumbnail that opens full size; Escape, the X or outside the photo closes it', async (t) => {
   if (!browser) return t.skip(skip);
   for (const width of [1200, 360]) {

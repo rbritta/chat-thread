@@ -1,6 +1,6 @@
 {
   "name": "chat-thread",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "description": "A WhatsApp-style conversation thread: bubbles by side, time and ticks, notes without a bubble for bots that narrate, safe markdown with copyable code, a growing message box, read-only and preview modes, dark, light or auto themes. Zero dependencies, vanilla JS, server-side rendering and a SQLite store for Node.",
   "keywords": [
     "chat",

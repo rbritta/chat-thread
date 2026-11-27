@@ -1,4 +1,4 @@
-/*! chat-thread v0.10.0 | MIT | https://github.com/rbritta/chat-thread */
+/*! chat-thread v0.11.0 | MIT | https://github.com/rbritta/chat-thread */
 (function (global) {
 'use strict';
 /**
@@ -48,6 +48,8 @@ const DEFAULT_STRINGS = Object.freeze({
   caption: 'Caption',
   close: 'Close',
   photo: 'Photo',
+  image: 'Image',
+  chooseAnother: 'Choose another',
   enlarge: 'Enlarge photo',
   pinned: 'Pinned',
   final: 'Final',
@@ -58,8 +60,12 @@ const DEFAULT_STRINGS = Object.freeze({
   showCurrent: 'See the current one',
 });
 
-/** What the + left of the box can offer. Only `camera` for now: take a photo and send it with a caption. */
-const ATTACH = Object.freeze(['camera']);
+/**
+ * What the + left of the box can offer: `camera` takes a photo, `image` picks a picture from the
+ * files (a phone's gallery). Either one also lets a picture pasted into the box in. Each goes to
+ * the same preview, with a caption, and is sent as a photo.
+ */
+const ATTACH = Object.freeze(['camera', 'image']);
 
 const DEFAULTS = Object.freeze({
   mode: 'chat',
@@ -674,7 +680,10 @@ const TICK_PATH = 'M2 13l4 4 8-9M10 16l1 1 9-10';
 const icon = (cls, label, inner) => `<svg class="ct-tick${cls}" viewBox="0 0 24 24" role="img" aria-label="${escapeHtml(label)}">${inner}</svg>`;
 const PLUS_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
 const CAMERA_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4l-1.8 2H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-3.2L15 4H9zm3 4.5a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9zm0 2a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5z"/></svg>';
-const ATTACH_ICONS = { camera: CAMERA_ICON };
+const IMAGE_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2zm0 2v10.6l3.8-3.8a1 1 0 0 1 1.4 0L13 14.6l1.8-1.8a1 1 0 0 1 1.4 0L19 15.6V5H5zm10.5 1.5a2 2 0 1 1 0 4 2 2 0 0 1 0-4z"/></svg>';
+const ATTACH_ICONS = { camera: CAMERA_ICON, image: IMAGE_ICON };
+/** The pictures `image` and a paste take: never SVG (it can carry script) and nothing a canvas cannot draw. */
+const PICTURE_TYPES = Object.freeze(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/bmp']);
 const SEND_ICON = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20.5l18-8.5L3 3.5v6.6l12 1.9-12 1.9z"/></svg>';
 
 /** Ticks of my message: clock while pending or queued, one tick sent, two delivered, two in color read, a red mark when it failed. */
@@ -843,10 +852,13 @@ function renderComposer(options) {
   const toggles = o.toggles.length
     ? `<div class="ct-toggles">${o.toggles.map((t) => `<label><input type="checkbox" name="${escapeHtml(t.name)}"${t.checked ? ' checked' : ''}> ${escapeHtml(t.label)}</label>`).join('')}</div>`
     : '';
-  // the + and its menu; the file input is a phone's own camera (and the way in with no camera API)
+  // the + and its menu; the camera's file input is a phone's own camera (and the way in with no
+  // camera API), the image's is the file picker (a phone's gallery)
   const attach = o.attach.length
     ? `<button type="button" class="ct-attach" aria-haspopup="menu" aria-expanded="false" aria-label="${escapeHtml(s.attach)}" title="${escapeHtml(s.attach)}">${PLUS_ICON}</button><div class="ct-menu" role="menu" hidden>${o.attach
-      .map((a) => `<button type="button" class="ct-menu-item" role="menuitem" data-attach="${a}"><span class="ct-menu-icon ct-menu-icon--${a}">${ATTACH_ICONS[a]}</span>${escapeHtml(s[a])}</button>`).join('')}</div><input type="file" class="ct-file" accept="image/*" capture="environment" tabindex="-1" aria-hidden="true" hidden>`
+      .map((a) => `<button type="button" class="ct-menu-item" role="menuitem" data-attach="${a}"><span class="ct-menu-icon ct-menu-icon--${a}">${ATTACH_ICONS[a]}</span>${escapeHtml(s[a])}</button>`).join('')}</div>${o.attach.includes('camera')
+      ? '<input type="file" class="ct-file" accept="image/*" capture="environment" tabindex="-1" aria-hidden="true" hidden>' : ''}${o.attach.includes('image')
+      ? `<input type="file" class="ct-pick" accept="${PICTURE_TYPES.join(',')}" tabindex="-1" aria-hidden="true" hidden>` : ''}`
     : '';
   // enterkeyhint: a phone's keyboard labels its Enter key "send" when Enter sends
   return `<div class="ct-composer">${chips}<div class="ct-row">${attach}<div class="ct-field"><textarea class="ct-input" rows="1" maxlength="${LIMITS.text}" enterkeyhint="${o.enterSends ? 'send' : 'enter'}" placeholder="${escapeHtml(s.placeholder)}" aria-label="${escapeHtml(s.placeholder)}"></textarea></div><button type="button" class="ct-send" disabled aria-label="${escapeHtml(s.send)}" title="${escapeHtml(s.send)}">${SEND_ICON}</button></div>${toggles}</div>`;
@@ -922,6 +934,16 @@ function fragment(html) {
   const tpl = document.createElement('template');
   tpl.innerHTML = html;
   return tpl.content;
+}
+
+/**
+ * The picture a paste brings (a screenshot, a copied image), or null. A paste that also brings
+ * text stays text: cells copied from a spreadsheet come with a picture of themselves.
+ */
+function pastedPicture(data) {
+  if (!data || String(data.getData?.('text/plain') ?? '').trim()) return null;
+  const items = [...(data.items ?? [])].filter((item) => item.kind === 'file').map((item) => item.getAsFile()).filter(Boolean);
+  return (items.length ? items : [...(data.files ?? [])]).find((file) => PICTURE_TYPES.includes(file.type)) ?? null;
 }
 
 // Motion is short and eased out (quick, then settling softly, so nothing snaps into place at
@@ -1036,7 +1058,7 @@ function createChat(el, options = {}) {
 
   const listeners = [
     ['click', onClick], ['keydown', onKeydown], ['input', onInput], ['mousedown', onMouseDown],
-    ['compositionstart', onComposition], ['compositionend', onComposition], ['change', onChange],
+    ['compositionstart', onComposition], ['compositionend', onComposition], ['change', onChange], ['paste', onPaste],
   ];
 
   function mount(hydrate) {
@@ -1131,11 +1153,18 @@ function createChat(el, options = {}) {
     return { open, close };
   })();
 
+  /*
+   * The photo's preview, whichever way the picture came: the live camera (`live`), a phone's own
+   * camera app (`phone`), the file picker of the + menu's Image (`image`) or a paste in the box
+   * (`paste`). The text already in the box moves into the caption, and leaves the box when the
+   * photo is sent.
+   */
   const camera = (() => {
     let layer = null;
     let stream = null;
     let shot = null;   // the canvas with the photo taken
-    let viaFile = false;
+    let origin = 'live';
+    let moved = false; // the caption came from the box
     const MAX_SIDE = 2048;
 
     const stop = () => {
@@ -1159,28 +1188,41 @@ function createChat(el, options = {}) {
     }
 
     function show(phase) {
+      const s = opts.strings;
       const live = phase === 'live';
       q('.ct-cam-video').hidden = !live;
       q('.ct-cam-shot').hidden = live;
       q('.ct-cam-foot--live').hidden = !live;
       q('.ct-cam-foot--shot').hidden = live;
-      q('.ct-cam-title').textContent = live ? opts.strings.takePhoto : opts.strings.photo;
+      q('.ct-cam-title').textContent = live ? s.takePhoto : s.photo;
+      layer.setAttribute('aria-label', origin === 'live' || origin === 'phone' ? s.camera : s.photo);
+      // a pasted picture has nothing to take again; a picked one is chosen again
+      const retake = q('.ct-cam-retake');
+      retake.hidden = origin === 'paste';
+      retake.textContent = origin === 'image' ? s.chooseAnother : s.retake;
+      if (!live && !moved && input?.value.trim() && !q('.ct-cam-caption').value) {
+        q('.ct-cam-caption').value = input.value.trim();
+        moved = true;
+      }
       (live ? q('.ct-cam-take') : q('.ct-cam-caption'))?.focus();
     }
 
-    /** The picture, at most MAX_SIDE on its long side, on the preview canvas. */
+    /** The picture, at most MAX_SIDE on its long side, on the preview canvas (on white: a JPEG has no transparency). */
     function keep(source, width, height) {
       const scale = Math.min(1, MAX_SIDE / Math.max(width, height));
       const c = q('.ct-cam-shot');
-      c.width = Math.round(width * scale);
-      c.height = Math.round(height * scale);
-      c.getContext('2d').drawImage(source, 0, 0, c.width, c.height);
+      c.width = Math.max(1, Math.round(width * scale));
+      c.height = Math.max(1, Math.round(height * scale));
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#fff';
+      ctx.fillRect(0, 0, c.width, c.height);
+      ctx.drawImage(source, 0, 0, c.width, c.height);
       shot = c;
       show('shot');
     }
 
     async function live() {
-      viaFile = false;
+      origin = 'live';
       if (!layer) build();
       show('live');
       try {
@@ -1190,20 +1232,23 @@ function createChat(el, options = {}) {
       } catch (err) {
         // no camera, or the permission refused: the file input still lets a photo in
         close();
-        pick();
+        pick('phone');
       }
     }
 
-    function pick() {
-      viaFile = true;
-      const file = root.querySelector('.ct-file');
+    /** A file input: `.ct-file` is a phone's own camera, `.ct-pick` the file picker (a phone's gallery). */
+    function pick(which = 'phone') {
+      origin = which;
+      const file = root.querySelector(which === 'image' ? '.ct-pick' : '.ct-file');
       if (!file) return;
       file.value = '';
       file.click();
     }
 
-    async function fromFile(file) {
-      if (!file || !/^image\//.test(file.type)) return;
+    /** A picture from a file input or a paste. The camera's own takes any image; the others only PICTURE_TYPES. */
+    async function fromFile(file, from = origin) {
+      if (!file || !(from === 'phone' ? /^image\//.test(file.type) : PICTURE_TYPES.includes(file.type))) return;
+      origin = from;
       try {
         const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
         if (!layer) build();
@@ -1240,7 +1285,13 @@ function createChat(el, options = {}) {
       const caption = q('.ct-cam-caption').value.trim();
       const photo = await new Promise((resolve) => shot.toBlob(resolve, 'image/jpeg', 0.85));
       const preview = thumbnail(shot);
+      // the box's text went as the caption: it leaves the box with the photo
+      const fromBox = moved;
       close();
+      if (photo && fromBox && input) {
+        input.value = '';
+        grow();
+      }
       if (photo) send(caption, { photo, preview });
       input?.focus();
     }
@@ -1248,6 +1299,7 @@ function createChat(el, options = {}) {
     function close() {
       stop();
       shot = null;
+      moved = false;
       if (!layer) return;
       layer.remove();
       layer = null;
@@ -1261,8 +1313,8 @@ function createChat(el, options = {}) {
         attachButton()?.focus();
       } else if (b.classList.contains('ct-cam-take')) take();
       else if (b.classList.contains('ct-cam-retake')) {
-        if (viaFile) pick();
-        else live();
+        if (origin === 'live') live();
+        else if (origin !== 'paste') pick(origin);
       } else if (b.classList.contains('ct-cam-send')) deliver();
     }
 
@@ -1281,9 +1333,11 @@ function createChat(el, options = {}) {
       /** A phone (coarse pointer) or a browser with no camera API opens the phone's camera app. */
       open() {
         const coarse = globalThis.matchMedia?.('(pointer: coarse)').matches;
-        if (coarse || !navigator.mediaDevices?.getUserMedia) pick();
+        if (coarse || !navigator.mediaDevices?.getUserMedia) pick('phone');
         else live();
       },
+      /** The + menu's Image: the file picker, then the same preview. */
+      pickImage: () => pick('image'),
       fromFile,
       close,
     };
@@ -1736,6 +1790,7 @@ function createChat(el, options = {}) {
     } else if (is('ct-menu-item')) {
       closeMenu();
       if (button.dataset.attach === 'camera') camera.open();
+      else if (button.dataset.attach === 'image') camera.pickImage();
     } else if (is('ct-send')) {
       send();
       // pressed from the keyboard, the button is now disabled: the focus goes back to the box
@@ -1835,8 +1890,17 @@ function createChat(el, options = {}) {
   }
 
   function onChange(ev) {
-    if (!ev.target.classList?.contains('ct-file')) return;
-    camera.fromFile(ev.target.files?.[0]);
+    if (ev.target.classList?.contains('ct-file')) camera.fromFile(ev.target.files?.[0], 'phone');
+    else if (ev.target.classList?.contains('ct-pick')) camera.fromFile(ev.target.files?.[0], 'image');
+  }
+
+  /** An image pasted into the box opens the photo's preview, when the + offers anything (`attach`). */
+  function onPaste(ev) {
+    if (ev.target !== input || !opts.attach.length || opts.mode !== 'chat') return;
+    const picture = pastedPicture(ev.clipboardData);
+    if (!picture) return;
+    ev.preventDefault();
+    camera.fromFile(picture, 'paste');
   }
 
   function onInput(ev) {
@@ -1913,6 +1977,8 @@ function createChat(el, options = {}) {
     send: (value, extra) => send(value, extra),
     /** Opens the camera, as the + menu's Camera does (only with `attach: ['camera']`). */
     openCamera() { if (root?.querySelector('.ct-file')) camera.open(); },
+    /** Opens the file picker, as the + menu's Image does (only with `attach: ['image']`). */
+    pickImage() { if (root?.querySelector('.ct-pick')) camera.pickImage(); },
     /** New options. The text being typed, the toggles' boxes and the focus in the box are kept. */
     configure(next = {}) {
       const draft = input?.value ?? '';
@@ -2620,5 +2686,5 @@ function createThreads(el, options = {}) {
   return api;
 }
 
-global.ChatThread = { createChat, restStore, memoryStore, localStore, LIMITS, STATES, FORMATS, MODES, KINDS, DEFAULT_STRINGS, ATTACH, DEFAULTS, resolveOptions, safeUrl, escapeHtml, linkify, renderMarkdown, renderWhatsApp, renderPlain, formatText, normalizeAt, dayKey, formatTime, dayLabel, normalizeMessage, keepOriginal, reviseMessage, pinnedOf, normalizeChips, normalizeToggles, normalizeAttach, isLong, authorTone, fill, renderMessage, renderPinned, renderDay, renderTyping, renderWaiting, renderList, renderComposer, renderThread, THREAD_STRINGS, THREAD_MODES, threadTitle, THREAD_HEADERS, createThreads };
+global.ChatThread = { createChat, restStore, memoryStore, localStore, LIMITS, STATES, FORMATS, MODES, KINDS, DEFAULT_STRINGS, ATTACH, DEFAULTS, resolveOptions, safeUrl, escapeHtml, linkify, renderMarkdown, renderWhatsApp, renderPlain, formatText, normalizeAt, dayKey, formatTime, dayLabel, normalizeMessage, keepOriginal, reviseMessage, pinnedOf, normalizeChips, normalizeToggles, normalizeAttach, isLong, authorTone, fill, PICTURE_TYPES, renderMessage, renderPinned, renderDay, renderTyping, renderWaiting, renderList, renderComposer, renderThread, THREAD_STRINGS, THREAD_MODES, threadTitle, THREAD_HEADERS, createThreads };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

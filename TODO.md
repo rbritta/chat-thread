@@ -7,7 +7,8 @@ Ideas that are not built yet, roughly in order. Open an issue before starting a 
 - [ ] Live updates from the HTTP handler (Server-Sent Events) and a `poll` option for `restStore`.
 - [ ] Older messages on scroll up (`load({ before })` is already in the server store).
 - [x] A photo inside the bubble (`image`, 0.7.0) and the camera behind the + (`attach`, 0.6.0).
-- [ ] More behind the +: a photo from the gallery, a file card in the bubble.
+- [x] A picture from the files or the gallery behind the +, and a pasted one (0.11.0).
+- [ ] A file card in the bubble (a PDF, a log) behind the +.
 - [ ] Reply to a message (the quoted bubble on top) and reactions.
 - [ ] A `system` kind: a short centered line ("Dana joined", "Moved to Friday").
 - [x] Markdown tables (0.10.0), with buttons in the message and a pinned message above the box.

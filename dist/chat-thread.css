@@ -25,6 +25,7 @@
   --ct-send: #2f6f5e;
   --ct-send-icon: #e6f3ee;
   --ct-camera: #ff2e74;
+  --ct-image: #8c6cff;
   --ct-alert: #f85149;
   --ct-day: #151a20;
   --ct-chip: #12171d;
@@ -342,7 +343,8 @@
 .ct-menu-icon { display: grid; place-items: center; width: 22px; height: 22px; }
 .ct-menu-icon svg { width: 20px; height: 20px; fill: currentColor; }
 .ct-menu-icon--camera { color: var(--ct-camera); }
-.ct-file { display: none; }
+.ct-menu-icon--image { color: var(--ct-image); }
+.ct-file, .ct-pick { display: none; }
 .ct-cam {
   position: fixed;
   inset: 0;
